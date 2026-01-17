@@ -14,7 +14,12 @@ Author: Systems Engineering Coursework
 """
 
 import matplotlib
-matplotlib.use('TkAgg')  # Use TkAgg backend for better compatibility
+# matplotlib.use('TkAgg')  # Use TkAgg backend for better compatibility
+
+# For macos, try:
+# matplotlib.use('Qt5Agg')  # Try Qt5Agg instead of TkAgg
+# # or
+matplotlib.use('macosx')  # Native macOS backend
 
 import numpy as np
 from scipy.integrate import solve_ivp
