@@ -24,9 +24,17 @@ src/
 ├── cart_pole.py         # CartPole class - physical parameters and system dynamics
 ├── simulator.py         # Simulator class - numerical integration using scipy
 ├── visualizer.py        # Visualizer class - state plots and animated visualization
-├── controller.py        # PIDController class for stabilization
+├── controller.py        # PIDController and LQRController classes
 ├── main_uncontrolled.py # Uncontrolled/passive simulation
-└── main_pid.py          # PID-controlled simulation
+├── main_pid.py          # PID-controlled simulation
+└── main_lqr.py          # LQR-controlled simulation
+
+plots/                    # Auto-generated plots from simulations
+├── uncontrolled_states.png
+├── pid_states.png
+├── pid_control_force.png
+├── lqr_states.png
+└── lqr_control_force.png
 ```
 
 ## Running the Simulations
@@ -47,7 +55,19 @@ python main_pid.py
 
 This demonstrates PID control that stabilizes the pendulum at the upright position from an initial angle of 0.3 rad (≈17°). Shows state trajectories, control force, and animation.
 
-## PID Controller
+**LQR Controlled (optimal control):**
+```bash
+cd src
+python main_lqr.py
+```
+
+This demonstrates optimal LQR control using full state feedback. The controller gains are computed by solving the continuous-time algebraic Riccati equation (CARE) with tunable Q and R cost matrices.
+
+**Note:** All simulations automatically save plots to the `plots/` directory.
+
+## Control Algorithms
+
+### PID Controller
 
 The PID controller computes a force to apply to the cart based on the pendulum angle error:
 
@@ -63,6 +83,28 @@ The PID controller computes a force to apply to the cart based on the pendulum a
 **Safety features:**
 - Force saturation: ±100 N
 - Integral anti-windup
+
+### LQR Controller
+
+The Linear Quadratic Regulator (LQR) provides optimal full-state feedback control by minimizing a cost function:
+
+J = ∫(x'Qx + u'Ru)dt
+
+where:
+- **Q matrix** (4×4): State cost - penalizes deviations in [x, x_dot, theta, theta_dot]
+- **R matrix** (1×1): Control cost - penalizes control effort
+
+**Default cost matrices:**
+- Q = diag([1, 1, 100, 10]) - heavily penalizes angle error
+- R = [[0.1]] - moderate control cost
+
+The optimal gains K are computed by solving the continuous-time algebraic Riccati equation (CARE). Control law: u = -Kx
+
+**Features:**
+- Optimal control for linearized system
+- Full state feedback (uses all 4 states)
+- Guaranteed stability for small angles
+- Force saturation: ±100 N
 
 ## Dependencies
 

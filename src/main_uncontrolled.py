@@ -4,6 +4,7 @@ Main entry point for the cart-pole simulation.
 Run this file to see the uncontrolled cart-pole simulation.
 """
 import numpy as np
+from pathlib import Path
 
 from cart_pole import CartPole
 from simulator import Simulator
@@ -42,12 +43,16 @@ def main():
     )
     print(f"Simulation complete. {len(result.time)} timesteps.")
     
+    # Create plots directory
+    plots_dir = Path(__file__).parent.parent / "plots"
+    plots_dir.mkdir(exist_ok=True)
+    
     # Create visualizer
     visualizer = Visualizer(cart_pole)
     
     # Plot state trajectories
     print("Generating state plots...")
-    visualizer.plot_states(result)
+    visualizer.plot_states(result, save_path=plots_dir / "uncontrolled_states.png")
     
     # Create and display animation
     print("Creating animation...")

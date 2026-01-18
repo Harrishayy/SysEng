@@ -1,7 +1,7 @@
 """
-Main entry point for controlled cart-pole simulation with PID controller.
+Main entry point for LQR-controlled cart-pole simulation.
 
-Run this file to see the cart-pole stabilized at the upright position.
+Run this file to see the cart-pole stabilized using optimal LQR control.
 """
 import numpy as np
 import matplotlib.pyplot as plt
@@ -10,7 +10,7 @@ from pathlib import Path
 from cart_pole import CartPole
 from simulator import Simulator
 from visualizer import Visualizer
-from controller import PIDController
+from controller import LQRController
 
 
 def main():
@@ -27,14 +27,29 @@ def main():
     # Create simulator
     simulator = Simulator(cart_pole)
     
-    # Create PID controller
-    # Tuned gains for this system
-    controller = PIDController(
-        kp=100,    # Proportional gain
-        ki=0.5,     # Integral gain (small to prevent windup)
-        kd=20.0,    # Derivative gain
-        setpoint=0.0  # Target: upright position
+    # Create LQR controller with custom cost matrices
+    Q = np.diag([1.0, 1.0, 100.0, 10.0])  # State cost: [x, x_dot, theta, theta_dot]
+    R = np.array([[0.1]])  # Control effort cost
+    
+    controller = LQRController(
+        cart_mass=cart_pole.M,
+        pendulum_mass=cart_pole.m,
+        rod_length=cart_pole.L,
+        cart_friction=cart_pole.b,
+        rotational_damping=cart_pole.c,
+        gravity=cart_pole.g,
+        Q=Q,
+        R=R
     )
+    
+    # Print LQR gains
+    gains = controller.get_gains()
+    print("LQR Gains:")
+    print(f"  K_x         = {gains['k_x']:.4f}")
+    print(f"  K_x_dot     = {gains['k_x_dot']:.4f}")
+    print(f"  K_theta     = {gains['k_theta']:.4f}")
+    print(f"  K_theta_dot = {gains['k_theta_dot']:.4f}")
+    print()
     
     # Define initial conditions
     # Starting with a moderate angle offset to test controller
@@ -48,7 +63,7 @@ def main():
     print(f"Initial angle: {np.rad2deg(initial_state[2]):.1f} degrees")
     
     # Run controlled simulation
-    print("Running controlled simulation...")
+    print("Running LQR-controlled simulation...")
     result = simulator.run(
         initial_state=initial_state,
         duration=10.0,
@@ -68,32 +83,30 @@ def main():
     print("Generating state plots...")
     fig = visualizer.plot_states(
         result,
-        save_path=plots_dir / "pid_states.png"
+        save_path=plots_dir / "lqr_states.png"
     )
-    fig.suptitle('PID Controlled Cart-Pole', fontsize=14, y=1.0)
+    fig.suptitle('LQR Controlled Cart-Pole', fontsize=14, y=1.0)
     
     # Calculate and plot control force
     print("Generating control force plot...")
     fig2, ax = plt.subplots(figsize=(10, 3))
     forces = []
-    controller.reset()  # Reset controller state
     for i in range(len(result.time)):
         t = result.time[i]
-        theta = result.theta[i]
-        theta_dot = result.theta_dot[i]
-        force = controller.compute(theta, theta_dot, t)
+        state = result.states[:, i]
+        force = controller.compute(state, t)
         forces.append(force)
     
     ax.plot(result.time, forces, 'g-', linewidth=1.5)
     ax.set_xlabel('Time (s)')
     ax.set_ylabel('Control Force (N)')
-    ax.set_title('PID Controller Output')
+    ax.set_title('LQR Controller Output')
     ax.grid(True, alpha=0.3)
     ax.axhline(0, color='k', linestyle='--', alpha=0.3)
     plt.tight_layout()
     
     # Save control force plot
-    force_plot_path = plots_dir / "pid_control_force.png"
+    force_plot_path = plots_dir / "lqr_control_force.png"
     fig2.savefig(force_plot_path, dpi=300, bbox_inches='tight')
     print(f"Control force plot saved to {force_plot_path}")
     

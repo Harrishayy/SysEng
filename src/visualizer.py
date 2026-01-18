@@ -31,13 +31,14 @@ class Visualizer:
         self.wheel_radius = 0.05
         self.bob_radius = 0.08
         
-    def plot_states(self, result: SimulationResult, figsize: tuple = (10, 8)) -> plt.Figure:
+    def plot_states(self, result: SimulationResult, figsize: tuple = (10, 8), save_path: Optional[str] = None) -> plt.Figure:
         """
         Plot the state variables over time.
         
         Args:
             result: SimulationResult from simulation
             figsize: Figure size
+            save_path: Optional path to save the figure
             
         Returns:
             Matplotlib figure
@@ -68,6 +69,11 @@ class Visualizer:
         axes[3].grid(True, alpha=0.3)
         
         plt.tight_layout()
+        
+        if save_path:
+            fig.savefig(save_path, dpi=300, bbox_inches='tight')
+            print(f"State plot saved to {save_path}")
+        
         return fig
     
     def animate(
