@@ -4,7 +4,7 @@ Simulator class for running cart-pole simulations.
 import numpy as np
 from scipy.integrate import solve_ivp
 from dataclasses import dataclass
-from typing import Callable, Optional
+from typing import Callable, Optional, Union
 
 from cart_pole import CartPole
 
@@ -56,6 +56,7 @@ class Simulator:
         duration: float,
         dt: float = 0.01,
         force_func: Optional[Callable[[float], float]] = None,
+        controller: Optional[object] = None,
         method: str = 'RK45'
     ) -> SimulationResult:
         """
@@ -66,17 +67,37 @@ class Simulator:
             duration: Simulation duration (s)
             dt: Time step for output (s)
             force_func: Optional function f(t) -> force, defaults to zero force
+            controller: Optional controller object with compute(theta, theta_dot, t) or compute(state, t) method
             method: Integration method ('RK45', 'RK23', 'DOP853', etc.)
             
         Returns:
             SimulationResult containing time and state arrays
         """
-        if force_func is None:
-            force_func = lambda t: 0.0
+        # Determine force source
+        if controller is not None:
+            # Use controller
+            def get_force(t, state):
+                # Check if controller uses full state or just angle
+                if hasattr(controller, 'compute'):
+                    import inspect
+                    sig = inspect.signature(controller.compute)
+                    n_params = len(sig.parameters)
+                    
+                    if n_params == 3:  # theta, theta_dot, t
+                        return controller.compute(state[2], state[3], t)
+                    elif n_params == 2:  # state, t
+                        return controller.compute(state, t)
+                    else:
+                        raise ValueError(f"Controller compute method has unexpected signature: {sig}")
+                return 0.0
+        elif force_func is not None:
+            get_force = lambda t, state: force_func(t)
+        else:
+            get_force = lambda t, state: 0.0
         
-        # Create wrapper for dynamics with force function
+        # Create wrapper for dynamics
         def dynamics_wrapper(t, state):
-            force = force_func(t)
+            force = get_force(t, state)
             return self.cart_pole.dynamics(t, state, force)
         
         # Time span and evaluation points
