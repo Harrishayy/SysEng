@@ -24,17 +24,20 @@ src/
 ├── cart_pole.py         # CartPole class - physical parameters and system dynamics
 ├── simulator.py         # Simulator class - numerical integration using scipy
 ├── visualizer.py        # Visualizer class - state plots and animated visualization
-├── controller.py        # PIDController and LQRController classes
+├── controller.py        # PIDController, LQRController, and SMCController classes
 ├── main_uncontrolled.py # Uncontrolled/passive simulation
 ├── main_pid.py          # PID-controlled simulation
-└── main_lqr.py          # LQR-controlled simulation
+├── main_lqr.py          # LQR-controlled simulation
+└── main_smc.py          # SMC-controlled simulation
 
 plots/                    # Auto-generated plots from simulations
 ├── uncontrolled_states.png
 ├── pid_states.png
 ├── pid_control_force.png
 ├── lqr_states.png
-└── lqr_control_force.png
+├── lqr_control_force.png
+├── smc_states.png
+└── smc_control_force.png
 ```
 
 ## Running the Simulations
@@ -62,6 +65,14 @@ python main_lqr.py
 ```
 
 This demonstrates optimal LQR control using full state feedback. The controller gains are computed by solving the continuous-time algebraic Riccati equation (CARE) with tunable Q and R cost matrices.
+
+**SMC Controlled (robust nonlinear control):**
+```bash
+cd src
+python main_smc.py
+```
+
+This demonstrates Sliding Mode Control, a robust nonlinear controller that is insensitive to model uncertainties and disturbances. Shows state trajectories, control force, sliding surface, and animation.
 
 **Note:** All simulations automatically save plots to the `plots/` directory.
 
@@ -104,6 +115,35 @@ The optimal gains K are computed by solving the continuous-time algebraic Riccat
 - Optimal control for linearized system
 - Full state feedback (uses all 4 states)
 - Guaranteed stability for small angles
+- Force saturation: ±100 N
+
+### SMC Controller
+
+Sliding Mode Control (SMC) is a robust nonlinear control technique that works in two phases:
+1. **Reaching phase:** Drive the system state to a sliding surface
+2. **Sliding phase:** Keep the system on the surface, where it converges to equilibrium
+
+**Sliding surface:**
+s = λθ + θ̇
+
+When s = 0, the pendulum angle follows θ̇ = -λθ, which decays exponentially.
+
+**Control law:**
+u = u_eq + u_sw
+
+where:
+- u_eq: Equivalent control (keeps system on surface)
+- u_sw: Switching control = -η·sat(s/φ)
+
+**Parameters:**
+- λ = 10.0 (sliding surface slope)
+- η = 20.0 (switching gain)
+- φ = 0.1 (boundary layer for smooth switching)
+
+**Features:**
+- Robust to model uncertainties and disturbances
+- Finite-time reaching of sliding surface
+- Boundary layer approach reduces chattering
 - Force saturation: ±100 N
 
 ## Dependencies

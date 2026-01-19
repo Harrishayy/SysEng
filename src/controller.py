@@ -240,3 +240,213 @@ class LQRController:
             'k_theta': self.K[0, 2],
             'k_theta_dot': self.K[0, 3]
         }
+
+
+class SMCController:
+    """
+    Sliding Mode Controller (SMC) for cart-pole stabilization.
+    
+    A robust nonlinear controller that drives the system state to a 
+    sliding surface and keeps it there despite disturbances.
+    
+    Sliding surface: s = lambda * theta + theta_dot
+    When s = 0, the system follows theta_dot = -lambda * theta,
+    which is exponentially stable.
+    """
+    
+    def __init__(
+        self,
+        cart_mass: float,
+        pendulum_mass: float,
+        rod_length: float,
+        cart_friction: float,
+        rotational_damping: float,
+        gravity: float,
+        lambda_: float = 10.0,
+        eta: float = 20.0,
+        phi: float = 0.1,
+        use_saturation: bool = True
+    ):
+        """
+        Initialize the SMC controller.
+        
+        Args:
+            cart_mass: Mass of the cart (kg)
+            pendulum_mass: Mass of the pendulum bob (kg)
+            rod_length: Length of the pendulum rod (m)
+            cart_friction: Cart friction coefficient (N/m/s)
+            rotational_damping: Rotational damping coefficient (N*m/rad/s)
+            gravity: Gravitational acceleration (m/s^2)
+            lambda_: Sliding surface slope (determines convergence rate on surface)
+            eta: Switching gain (determines reaching speed to surface)
+            phi: Boundary layer thickness (for saturation smoothing)
+            use_saturation: If True, use sat() instead of sign() for smoother control
+        """
+        self.M = cart_mass
+        self.m = pendulum_mass
+        self.L = rod_length
+        self.b = cart_friction
+        self.c = rotational_damping
+        self.g = gravity
+        
+        self.lambda_ = lambda_
+        self.eta = eta
+        self.phi = phi
+        self.use_saturation = use_saturation
+    
+    def _compute_sliding_surface(self, theta: float, theta_dot: float) -> float:
+        """
+        Compute the sliding surface value.
+        
+        s = lambda * theta + theta_dot
+        
+        Args:
+            theta: Pendulum angle (rad)
+            theta_dot: Angular velocity (rad/s)
+            
+        Returns:
+            Sliding surface value s
+        """
+        return self.lambda_ * theta + theta_dot
+    
+    def _switching_function(self, s: float) -> float:
+        """
+        Compute the switching function (sign or saturation).
+        
+        Args:
+            s: Sliding surface value
+            
+        Returns:
+            Switching value in [-1, 1]
+        """
+        if self.use_saturation:
+            # Saturation function for smooth control (boundary layer approach)
+            if abs(s) <= self.phi:
+                return s / self.phi
+            else:
+                return np.sign(s)
+        else:
+            # Pure sign function (may cause chattering)
+            return np.sign(s)
+    
+    def compute(self, state: np.ndarray, t: float) -> float:
+        """
+        Compute the control force using sliding mode control.
+        
+        The control law consists of:
+        1. Equivalent control (u_eq): keeps system on sliding surface
+        2. Switching control (u_sw): drives system to sliding surface
+        
+        Args:
+            state: State vector [x, x_dot, theta, theta_dot]
+            t: Current time (s)
+            
+        Returns:
+            Control force (N)
+        """
+        x, x_dot, theta, theta_dot = state
+        
+        # System parameters
+        M, m, L, b, c, g = self.M, self.m, self.L, self.b, self.c, self.g
+        
+        # Compute sliding surface
+        s = self._compute_sliding_surface(theta, theta_dot)
+        
+        # Precompute trigonometric terms
+        cos_theta = np.cos(theta)
+        sin_theta = np.sin(theta)
+        
+        # Mass matrix elements (from dynamics)
+        M11 = M + m
+        M12 = m * L * cos_theta
+        M22 = m * L**2
+        
+        # Determinant of mass matrix
+        det_M = M11 * M22 - M12 * M12
+        
+        # For the sliding surface s = lambda*theta + theta_dot,
+        # we need s_dot = 0 on the surface.
+        # s_dot = lambda*theta_dot + theta_ddot
+        
+        # From the equations of motion, theta_ddot depends on F.
+        # We can derive the equivalent control by setting s_dot = 0.
+        
+        # The RHS of the dynamics (without F):
+        # For theta_ddot: comes from solving the coupled equations
+        
+        # Simplified equivalent control derivation:
+        # theta_ddot = f(state) + g(state)*F
+        # For s_dot = 0: lambda*theta_dot + f + g*F = 0
+        # F_eq = -(lambda*theta_dot + f) / g
+        
+        # Compute f and g coefficients for theta_ddot
+        # From the dynamics: A * [x_ddot, theta_ddot]^T = B
+        # where B1 = F - b*x_dot + m*L*theta_dot^2*sin(theta)
+        #       B2 = -c*theta_dot + m*g*L*sin(theta)
+        
+        # Solving for theta_ddot:
+        # theta_ddot = (M11 * B2 - M12 * B1) / det_M
+        
+        # B2 term (independent of F)
+        B2_no_F = -c * theta_dot + m * g * L * sin_theta
+        
+        # B1 terms split into F-dependent and F-independent parts
+        B1_no_F = -b * x_dot + m * L * theta_dot**2 * sin_theta
+        
+        # theta_ddot = (M11 * B2_no_F - M12 * B1_no_F) / det_M - M12 / det_M * F
+        # So: f = (M11 * B2_no_F - M12 * B1_no_F) / det_M
+        #     g = -M12 / det_M
+        
+        f = (M11 * B2_no_F - M12 * B1_no_F) / det_M
+        g_coef = -M12 / det_M
+        
+        # Equivalent control: sets s_dot = lambda*theta_dot + theta_ddot = 0
+        # lambda*theta_dot + f + g*F_eq = 0
+        # F_eq = -(lambda*theta_dot + f) / g
+        
+        if abs(g_coef) > 1e-10:
+            u_eq = -(self.lambda_ * theta_dot + f) / g_coef
+        else:
+            u_eq = 0.0
+        
+        # Switching control: drives system toward sliding surface
+        # u_sw = -eta * sign(s) / g  (or with saturation)
+        if abs(g_coef) > 1e-10:
+            u_sw = -self.eta * self._switching_function(s) / g_coef
+        else:
+            u_sw = -self.eta * self._switching_function(s)
+        
+        # Total control
+        force = u_eq + u_sw
+        
+        # Apply force limits
+        max_force = 100.0
+        force = np.clip(force, -max_force, max_force)
+        
+        return force
+    
+    def get_sliding_surface(self, state: np.ndarray) -> float:
+        """
+        Get the current sliding surface value (useful for plotting).
+        
+        Args:
+            state: State vector [x, x_dot, theta, theta_dot]
+            
+        Returns:
+            Sliding surface value s
+        """
+        return self._compute_sliding_surface(state[2], state[3])
+    
+    def get_parameters(self) -> dict:
+        """
+        Get the controller parameters.
+        
+        Returns:
+            Dictionary with controller parameters
+        """
+        return {
+            'lambda': self.lambda_,
+            'eta': self.eta,
+            'phi': self.phi,
+            'use_saturation': self.use_saturation
+        }
