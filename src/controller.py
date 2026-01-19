@@ -115,7 +115,8 @@ class LQRController:
         rotational_damping: float,
         gravity: float,
         Q: np.ndarray = None,
-        R: np.ndarray = None
+        R: np.ndarray = None,
+        setpoint: np.ndarray = None
     ):
         """
         Initialize the LQR controller.
@@ -129,6 +130,7 @@ class LQRController:
             gravity: Gravitational acceleration (m/s^2)
             Q: State cost matrix (4x4), default: diagonal [1, 1, 10, 1]
             R: Control cost matrix (1x1), default: [[0.1]]
+            setpoint: Desired state [x_desired, 0, 0, 0], default: [0, 0, 0, 0]
         """
         self.M = cart_mass
         self.m = pendulum_mass
@@ -148,6 +150,10 @@ class LQRController:
         
         self.Q = Q
         self.R = R
+        # Desired state setpoint: [x_desired, 0, 0, 0]
+        if setpoint is None:
+            setpoint = np.array([0.0, 0.0, 0.0, 0.0])
+        self.setpoint = np.array(setpoint, dtype=float)
         
         # Compute linearized system matrices
         self.A, self.B = self._linearize_system()
@@ -208,18 +214,21 @@ class LQRController:
     
     def compute(self, state: np.ndarray, t: float) -> float:
         """
-        Compute the control force using LQR full state feedback.
+        Compute the control force using LQR full state feedback with setpoint tracking.
         
         Args:
-            state: State vector [x, x_dot, theta, theta_dot]
+            state: Current state vector [x, x_dot, theta, theta_dot]
             t: Current time (s) - not used but kept for interface consistency
             
         Returns:
             Control force (N)
         """
-        # LQR control law: u = -K * x
-        # The negative sign is because we want to drive the state to zero
-        force = -float(self.K @ state.reshape(-1, 1))
+        # LQR control law: u = -K * (x - x_setpoint)
+        # Compute error from setpoint
+        error = state - self.setpoint
+        
+        # Apply LQR feedback on the error
+        force = -float(self.K @ error.reshape(-1, 1))
         
         # Apply force limits
         max_force = 100.0

@@ -28,8 +28,13 @@ def main():
     simulator = Simulator(cart_pole)
     
     # Create LQR controller with custom cost matrices
-    Q = np.diag([1.0, 1.0, 100.0, 10.0])  # State cost: [x, x_dot, theta, theta_dot]
+    # Q matrix: penalize deviations in [x, x_dot, theta, theta_dot]
+    # Higher weights = stronger control on that state
+    Q = np.diag([3.0, 0.5, 100.0, 10.0])  # Penalize cart position, angle most critical
     R = np.array([[0.1]])  # Control effort cost
+    
+    # Define desired setpoint: cart at x=2.0m, pendulum balanced
+    setpoint = np.array([2.0, 0.0, 0.0, 0.0])  # [x_desired, x_dot_desired, theta_desired, theta_dot_desired]
     
     controller = LQRController(
         cart_mass=cart_pole.M,
@@ -39,10 +44,11 @@ def main():
         rotational_damping=cart_pole.c,
         gravity=cart_pole.g,
         Q=Q,
-        R=R
+        R=R,
+        setpoint=setpoint
     )
     
-    # Print LQR gains
+    # Print LQR gains and setpoint
     gains = controller.get_gains()
     print("LQR Gains:")
     print(f"  K_x         = {gains['k_x']:.4f}")
@@ -50,17 +56,19 @@ def main():
     print(f"  K_theta     = {gains['k_theta']:.4f}")
     print(f"  K_theta_dot = {gains['k_theta_dot']:.4f}")
     print()
+    print(f"Setpoint: {setpoint}")
     
     # Define initial conditions
     # Starting with a moderate angle offset to test controller
     initial_state = np.array([
         0.0,    # x: cart position (m)
         0.0,    # x_dot: cart velocity (m/s)
-        0.3,    # theta: pendulum angle (rad) - about 17 degrees
+        np.deg2rad(15.0),    # theta: pendulum angle (rad) - about 15 degrees
         0.0     # theta_dot: angular velocity (rad/s)
     ])
     
     print(f"Initial angle: {np.rad2deg(initial_state[2]):.1f} degrees")
+    print(f"Initial position: {initial_state[0]:.2f} meters")
     
     # Run controlled simulation
     print("Running LQR-controlled simulation...")
