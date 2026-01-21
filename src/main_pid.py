@@ -27,13 +27,20 @@ def main():
     # Create simulator
     simulator = Simulator(cart_pole)
     
-    # Create PID controller
+    # Create PID controller with position setpoint
     # Tuned gains for this system
     controller = PIDController(
-        kp=100,    # Proportional gain
-        ki=0.5,     # Integral gain (small to prevent windup)
-        kd=20.0,    # Derivative gain
-        setpoint=0.0  # Target: upright position
+        # Angle control gains (primary)
+        kp_theta=100,    # Proportional gain for angle
+        ki_theta=0.5,    # Integral gain for angle
+        kd_theta=20.0,   # Derivative gain for angle
+        # Position control gains (secondary)
+        kp_x=7.0,       # Proportional gain for position
+        ki_x=0.0,        # Integral gain for position
+        kd_x=12.0,       # Derivative gain for position velocity
+        # Setpoints
+        theta_setpoint=0.0,  # Target: upright position
+        x_setpoint=2.0       # Target: cart at 2.0m
     )
     
     # Define initial conditions
@@ -41,11 +48,13 @@ def main():
     initial_state = np.array([
         0.0,    # x: cart position (m)
         0.0,    # x_dot: cart velocity (m/s)
-        0.3,    # theta: pendulum angle (rad) - about 17 degrees
+        np.deg2rad(15.0),    # theta: pendulum angle (rad) - about 15 degrees
         0.0     # theta_dot: angular velocity (rad/s)
     ])
     
     print(f"Initial angle: {np.rad2deg(initial_state[2]):.1f} degrees")
+    print(f"Initial position: {initial_state[0]:.2f} meters")
+    print(f"Target position: {controller.x_setpoint:.2f} meters")
     
     # Run controlled simulation
     print("Running controlled simulation...")
@@ -79,9 +88,8 @@ def main():
     controller.reset()  # Reset controller state
     for i in range(len(result.time)):
         t = result.time[i]
-        theta = result.theta[i]
-        theta_dot = result.theta_dot[i]
-        force = controller.compute(theta, theta_dot, t)
+        state = result.states[:, i]
+        force = controller.compute(state, t)
         forces.append(force)
     
     ax.plot(result.time, forces, 'g-', linewidth=1.5)
