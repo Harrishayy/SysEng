@@ -91,14 +91,32 @@ def main():
     print(f"Initial angle: {np.rad2deg(initial_state[2]):.1f} degrees")
     print(f"Initial position: {initial_state[0]:.2f} meters")
     
-    # Run controlled simulation with noise
-    print("Running LQR-controlled simulation with measurement noise...")
+    # Define disturbance function (impulse forces at specific times)
+    def disturbance_func(t):
+        """
+        Apply impulse disturbances at specific times.
+        - t=3s: Push right (+20 N for 0.2s)
+        - t=6s: Push left (-15 N for 0.2s)
+        """
+        if 3.0 <= t < 3.2:
+            return 20.0  # Push right
+        elif 6.0 <= t < 6.2:
+            return -15.0  # Push left
+        return 0.0
+    
+    print("\nDisturbances:")
+    print("  t=3.0s: +20 N impulse (0.2s duration)")
+    print("  t=6.0s: -15 N impulse (0.2s duration)")
+    
+    # Run controlled simulation with noise and disturbances
+    print("\nRunning LQR-controlled simulation with noise and disturbances...")
     result = simulator.run_with_noise(
         initial_state=initial_state,
         duration=10.0,
         dt=dt,
         controller=controller,
-        state_processor=state_processor
+        state_processor=state_processor,
+        disturbance_func=disturbance_func
     )
     print(f"Simulation complete. {len(result.time)} timesteps.")
     
@@ -109,37 +127,19 @@ def main():
     # Create visualizer
     visualizer = Visualizer(cart_pole)
     
-    # Plot state trajectories with noise comparison
-    print("Generating state plots...")
-    fig = visualizer.plot_states_with_noise(
+    # Plot comprehensive view (states, forces, disturbances)
+    print("Generating comprehensive plots...")
+    fig = visualizer.plot_comprehensive(
         result,
         save_path=plots_dir / "lqr_states.png"
     )
-    fig.suptitle('LQR Controlled Cart-Pole (with noise)', fontsize=14, y=1.0)
+    fig.suptitle('LQR Controlled Cart-Pole (with noise and disturbances)', fontsize=14, y=1.0)
     
-    # Calculate and plot control force (using filtered states as controller sees them)
-    print("Generating control force plot...")
-    fig2, ax = plt.subplots(figsize=(10, 3))
-    forces = []
-    for i in range(len(result.time)):
-        t = result.time[i]
-        # Use filtered states (what controller actually received)
-        state = result.filtered_states[:, i]
-        force = controller.compute(state, t)
-        forces.append(force)
-    
-    ax.plot(result.time, forces, 'g-', linewidth=1.5)
-    ax.set_xlabel('Time (s)')
-    ax.set_ylabel('Control Force (N)')
-    ax.set_title('LQR Controller Output')
-    ax.grid(True, alpha=0.3)
-    ax.axhline(0, color='k', linestyle='--', alpha=0.3)
-    plt.tight_layout()
-    
-    # Save control force plot
-    force_plot_path = plots_dir / "lqr_control_force.png"
-    fig2.savefig(force_plot_path, dpi=300, bbox_inches='tight')
-    print(f"Control force plot saved to {force_plot_path}")
+    # Also save force plot separately
+    fig2 = visualizer.plot_forces(
+        result,
+        save_path=plots_dir / "lqr_control_force.png"
+    )
     
     # Create and display animation
     print("Creating animation...")

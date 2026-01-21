@@ -1,6 +1,6 @@
 # Inverted Pendulum (Cart-Pole) Simulation
 
-A modular simulation of an inverted pendulum on a cart using numerical integration, with multiple control algorithms (PID, LQR, Pole Placement) and realistic measurement noise with state filtering.
+A modular simulation of an inverted pendulum on a cart using numerical integration, with multiple control algorithms (PID, LQR, Pole Placement), realistic measurement noise with state filtering, external disturbances, and interactive real-time parameter adjustment.
 
 ## System Description
 
@@ -21,24 +21,25 @@ The simulation solves the coupled nonlinear equations of motion for the cart pos
 
 ```
 src/
-├── cart_pole.py         # CartPole class - physical parameters and system dynamics
-├── simulator.py         # Simulator class - numerical integration using scipy
-├── visualizer.py        # Visualizer class - state plots and animated visualization
-├── controller.py        # PIDController, LQRController, and SMCController classes
-├── state_filter.py      # Measurement noise and two-stage state filtering
-├── main_uncontrolled.py # Uncontrolled/passive simulation
-├── main_pid.py          # PID-controlled simulation
-├── main_lqr.py          # LQR-controlled simulation
-└── main_smc.py          # SMC-controlled simulation
+├── cart_pole.py            # CartPole class - physical parameters and system dynamics
+├── simulator.py            # Simulator class - numerical integration with disturbances
+├── visualizer.py           # Visualizer class - state plots, forces, and animation
+├── controller.py           # PIDController, LQRController, PolePlacementController
+├── state_filter.py         # Measurement noise and two-stage state filtering
+├── main_uncontrolled.py    # Uncontrolled/passive simulation
+├── main_pid.py             # PID-controlled simulation
+├── main_lqr.py             # LQR-controlled simulation with disturbances
+├── main_pole_placement.py  # Pole Placement-controlled simulation
+└── main_interactive.py     # Interactive GUI with real-time parameter adjustment
 
-plots/                    # Auto-generated plots from simulations
+plots/                       # Auto-generated plots from simulations
 ├── uncontrolled_states.png
 ├── pid_states.png
 ├── pid_control_force.png
 ├── lqr_states.png
 ├── lqr_control_force.png
-├── smc_states.png
-└── smc_control_force.png
+├── pole_placement_states.png
+└── pole_placement_control_force.png
 ```
 
 ## Running the Simulations
@@ -75,7 +76,38 @@ python main_pole_placement.py
 
 This demonstrates pole placement control where closed-loop poles are directly specified. Shows state trajectories, control force, and animation.
 
+**Interactive Simulation (real-time parameter adjustment):**
+```bash
+cd src
+python main_interactive.py
+```
+
+This launches an interactive GUI that allows you to:
+- Switch between controllers (PID, LQR, Pole Placement) in real-time
+- Adjust PID gains using sliders and observe immediate effects
+- Apply manual disturbance impulses to test disturbance rejection
+- Toggle measurement noise on/off
+- Set initial conditions and reset the simulation
+- View real-time plots of angle and control force
+
 **Note:** All simulations automatically save plots to the `plots/` directory. Plots show true states (blue), noisy measurements (red dots), and filtered estimates (green).
+
+## External Disturbances
+
+The simulation supports external disturbance forces applied to the cart. Disturbances are:
+- Visualized as red arrows in the animation
+- Plotted separately in force plots
+- Used to test controller robustness and disturbance rejection
+
+Example disturbance function (from `main_lqr.py`):
+```python
+def disturbance_func(t):
+    if 3.0 <= t < 3.2:
+        return 20.0   # Push right at t=3s
+    elif 6.0 <= t < 6.2:
+        return -15.0  # Push left at t=6s
+    return 0.0
+```
 
 ## Measurement Noise and State Filtering
 
@@ -186,5 +218,23 @@ has eigenvalues at the specified pole locations.
 ## Dependencies
 
 - numpy
-- scipy
+- scipy  
 - matplotlib
+
+## Requirements Compliance
+
+This simulation addresses the following coursework requirements:
+
+1. **Equations of Motion:** Nonlinear dynamics derived using Newton's laws with air drag (cart friction) and damping at the pivot point.
+
+2. **Sensor Noise Simulation:** Gaussian noise on position and angle measurements with two-stage filtering (low-pass + dirty derivative).
+
+3. **Controller Design:** Three controllers implemented - PID, LQR (optimal), and Pole Placement. Performance can be compared under noise and disturbances.
+
+4. **Python Implementation:** Uses scipy for ODE integration, incorporates noise in the control loop.
+
+5. **Visualization:**
+   - Dynamic animation of cart and pendulum motion
+   - Real-time plots of position, angle, control force, and disturbances
+   - Disturbances visually represented as force arrows
+   - Interactive GUI for real-time parameter adjustment

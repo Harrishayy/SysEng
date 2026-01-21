@@ -139,6 +139,131 @@ class Visualizer:
         
         return fig
     
+    def plot_forces(
+        self,
+        result: SimulationResult,
+        figsize: tuple = (10, 4),
+        save_path: Optional[str] = None
+    ) -> plt.Figure:
+        """
+        Plot control forces and disturbances over time.
+        
+        Args:
+            result: SimulationResult with control_forces and disturbances
+            figsize: Figure size
+            save_path: Optional path to save the figure
+            
+        Returns:
+            Matplotlib figure
+        """
+        fig, axes = plt.subplots(2, 1, figsize=figsize, sharex=True)
+        
+        # Control force
+        if result.control_forces is not None:
+            axes[0].plot(result.time, result.control_forces, 'g-', linewidth=1.5, label='Control Force')
+        axes[0].set_ylabel('Control Force (N)')
+        axes[0].set_title('Forces Applied to Cart')
+        axes[0].grid(True, alpha=0.3)
+        axes[0].axhline(0, color='k', linestyle='--', alpha=0.3)
+        axes[0].legend(loc='upper right')
+        
+        # Disturbance
+        if result.disturbances is not None:
+            axes[1].plot(result.time, result.disturbances, 'r-', linewidth=1.5, label='Disturbance')
+            # Fill under disturbance curve to make it more visible
+            axes[1].fill_between(result.time, 0, result.disturbances, alpha=0.3, color='red')
+        axes[1].set_ylabel('Disturbance (N)')
+        axes[1].set_xlabel('Time (s)')
+        axes[1].grid(True, alpha=0.3)
+        axes[1].axhline(0, color='k', linestyle='--', alpha=0.3)
+        axes[1].legend(loc='upper right')
+        
+        plt.tight_layout()
+        
+        if save_path:
+            fig.savefig(save_path, dpi=300, bbox_inches='tight')
+            print(f"Force plot saved to {save_path}")
+        
+        return fig
+    
+    def plot_comprehensive(
+        self,
+        result: SimulationResult,
+        figsize: tuple = (14, 12),
+        save_path: Optional[str] = None
+    ) -> plt.Figure:
+        """
+        Create a comprehensive plot showing all simulation data.
+        
+        Includes: cart position, pendulum angle, control force, disturbance.
+        
+        Args:
+            result: SimulationResult with all data
+            figsize: Figure size
+            save_path: Optional path to save the figure
+            
+        Returns:
+            Matplotlib figure
+        """
+        has_noise = result.noisy_states is not None and result.filtered_states is not None
+        has_forces = result.control_forces is not None
+        has_disturbance = result.disturbances is not None
+        
+        n_plots = 4 if (has_forces or has_disturbance) else 2
+        fig, axes = plt.subplots(n_plots, 1, figsize=figsize, sharex=True)
+        
+        # Cart position
+        if has_noise:
+            axes[0].plot(result.time, result.states[0], 'b-', linewidth=1.5, label='True', alpha=0.8)
+            axes[0].plot(result.time, result.noisy_states[0], 'r.', markersize=1, label='Noisy', alpha=0.3)
+            axes[0].plot(result.time, result.filtered_states[0], 'g-', linewidth=1.5, label='Filtered', alpha=0.8)
+            axes[0].legend(loc='upper right')
+        else:
+            axes[0].plot(result.time, result.x, 'b-', linewidth=1.5)
+        axes[0].set_ylabel('Cart Position (m)')
+        axes[0].set_title('Cart-Pole Simulation - Comprehensive View')
+        axes[0].grid(True, alpha=0.3)
+        
+        # Pendulum angle
+        if has_noise:
+            axes[1].plot(result.time, np.rad2deg(result.states[2]), 'b-', linewidth=1.5, label='True', alpha=0.8)
+            axes[1].plot(result.time, np.rad2deg(result.noisy_states[2]), 'r.', markersize=1, label='Noisy', alpha=0.3)
+            axes[1].plot(result.time, np.rad2deg(result.filtered_states[2]), 'g-', linewidth=1.5, label='Filtered', alpha=0.8)
+            axes[1].legend(loc='upper right')
+        else:
+            axes[1].plot(result.time, np.rad2deg(result.theta), 'r-', linewidth=1.5)
+        axes[1].axhline(0, color='k', linestyle='--', alpha=0.3)
+        axes[1].set_ylabel('Pendulum Angle (deg)')
+        axes[1].grid(True, alpha=0.3)
+        
+        if n_plots > 2:
+            # Control force
+            if has_forces:
+                axes[2].plot(result.time, result.control_forces, 'g-', linewidth=1.5, label='Control')
+            axes[2].set_ylabel('Control Force (N)')
+            axes[2].grid(True, alpha=0.3)
+            axes[2].axhline(0, color='k', linestyle='--', alpha=0.3)
+            axes[2].legend(loc='upper right')
+            
+            # Disturbance
+            if has_disturbance:
+                axes[3].plot(result.time, result.disturbances, 'r-', linewidth=1.5, label='Disturbance')
+                axes[3].fill_between(result.time, 0, result.disturbances, alpha=0.3, color='red')
+            axes[3].set_ylabel('Disturbance (N)')
+            axes[3].grid(True, alpha=0.3)
+            axes[3].axhline(0, color='k', linestyle='--', alpha=0.3)
+            axes[3].legend(loc='upper right')
+        
+        axes[-1].set_xlabel('Time (s)')
+        
+        plt.tight_layout()
+        
+        if save_path:
+            fig.savefig(save_path, dpi=300, bbox_inches='tight')
+            print(f"Comprehensive plot saved to {save_path}")
+        
+        return fig
+    
     def animate(
         self,
         result: SimulationResult,
@@ -215,6 +340,26 @@ class Visualizer:
                             fontsize=10, verticalalignment='top',
                             bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8))
         
+        # Force display
+        force_text = ax.text(0.02, 0.75, '', transform=ax.transAxes,
+                            fontsize=10, verticalalignment='top',
+                            bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8))
+        
+        # Force arrows (control = green, disturbance = red)
+        has_forces = result.control_forces is not None
+        has_disturbance = result.disturbances is not None
+        
+        # Scale factor for force arrows (adjust for visibility)
+        force_scale = 0.02  # meters per Newton
+        
+        # Control force arrow
+        control_arrow = ax.annotate('', xy=(0, 0), xytext=(0, 0),
+                                   arrowprops=dict(arrowstyle='->', color='green', lw=2))
+        
+        # Disturbance arrow
+        disturbance_arrow = ax.annotate('', xy=(0, 0), xytext=(0, 0),
+                                       arrowprops=dict(arrowstyle='->', color='red', lw=3))
+        
         def init():
             """Initialize animation."""
             cart.set_x(0)
@@ -225,7 +370,8 @@ class Visualizer:
             bob.center = (0, 0)
             time_text.set_text('')
             angle_text.set_text('')
-            return cart, wheel_left, wheel_right, rod, bob, time_text, angle_text
+            force_text.set_text('')
+            return cart, wheel_left, wheel_right, rod, bob, time_text, angle_text, force_text
         
         def update(frame):
             """Update animation frame."""
@@ -262,7 +408,30 @@ class Visualizer:
             time_text.set_text(f'Time: {t:.2f} s')
             angle_text.set_text(f'Angle: {np.rad2deg(theta):.1f}°')
             
-            return cart, wheel_left, wheel_right, rod, bob, time_text, angle_text
+            # Update force arrows and text
+            force_info = []
+            arrow_y = cart_y + self.cart_height / 2  # Middle of cart
+            
+            if has_forces and frame < len(result.control_forces):
+                ctrl_force = result.control_forces[frame]
+                force_info.append(f'Control: {ctrl_force:.1f} N')
+                # Update control arrow
+                arrow_length = ctrl_force * force_scale
+                control_arrow.xy = (x + arrow_length, arrow_y)
+                control_arrow.xytext = (x, arrow_y)
+            
+            if has_disturbance and frame < len(result.disturbances):
+                dist_force = result.disturbances[frame]
+                force_info.append(f'Disturbance: {dist_force:.1f} N')
+                # Update disturbance arrow (show at top of cart, different y level)
+                arrow_length = dist_force * force_scale
+                dist_arrow_y = cart_y + self.cart_height
+                disturbance_arrow.xy = (x + arrow_length, dist_arrow_y)
+                disturbance_arrow.xytext = (x, dist_arrow_y)
+            
+            force_text.set_text('\n'.join(force_info) if force_info else '')
+            
+            return cart, wheel_left, wheel_right, rod, bob, time_text, angle_text, force_text
         
         # Create animation
         anim = FuncAnimation(
