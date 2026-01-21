@@ -7,94 +7,131 @@ from scipy.linalg import solve_continuous_are
 
 class PIDController:
     """
-    PID controller for cart-pole stabilization.
+    Cascaded PID controller for cart-pole stabilization with position control.
     
-    The controller computes the force to apply to the cart to keep
-    the pendulum upright (theta = 0).
+    The controller computes the force to apply to the cart to:
+    1. Keep the pendulum upright (theta = 0) - primary objective
+    2. Move cart to desired position (x = x_setpoint) - secondary objective
+    
+    Uses a cascaded approach where position control is weighted less than angle control.
     """
     
     def __init__(
         self,
-        kp: float = 50.0,
-        ki: float = 0.0,
-        kd: float = 20.0,
-        setpoint: float = 0.0
+        kp_theta: float = 100.0,
+        ki_theta: float = 0.5,
+        kd_theta: float = 20.0,
+        kp_x: float = 10.0,
+        ki_x: float = 0.1,
+        kd_x: float = 15.0,
+        theta_setpoint: float = 0.0,
+        x_setpoint: float = 0.0
     ):
         """
-        Initialize the PID controller.
+        Initialize the cascaded PID controller.
         
         Args:
-            kp: Proportional gain
-            ki: Integral gain
-            kd: Derivative gain
-            setpoint: Target angle (rad), typically 0 for upright
+            kp_theta: Proportional gain for angle
+            ki_theta: Integral gain for angle
+            kd_theta: Derivative gain for angle
+            kp_x: Proportional gain for position
+            ki_x: Integral gain for position
+            kd_x: Derivative gain for position (velocity damping)
+            theta_setpoint: Target angle (rad), typically 0 for upright
+            x_setpoint: Target cart position (m)
         """
-        self.kp = kp
-        self.ki = ki
-        self.kd = kd
-        self.setpoint = setpoint
+        # Angle PID gains
+        self.kp_theta = kp_theta
+        self.ki_theta = ki_theta
+        self.kd_theta = kd_theta
+        self.theta_setpoint = theta_setpoint
+        
+        # Position PID gains
+        self.kp_x = kp_x
+        self.ki_x = ki_x
+        self.kd_x = kd_x
+        self.x_setpoint = x_setpoint
         
         # Internal state
-        self.integral = 0.0
-        self.previous_error = 0.0
+        self.integral_theta = 0.0
+        self.integral_x = 0.0
         self.previous_time = None
     
-    def compute(self, theta: float, theta_dot: float, t: float) -> float:
+    def compute(self, state: np.ndarray, t: float) -> float:
         """
         Compute the control force based on current state.
         
         Args:
-            theta: Current pendulum angle (rad)
-            theta_dot: Current angular velocity (rad/s)
+            state: Current state vector [x, x_dot, theta, theta_dot]
             t: Current time (s)
             
         Returns:
             Control force to apply to cart (N)
         """
-        # Compute error (positive error means pendulum leaning to positive angle)
-        error = theta - self.setpoint
+        x, x_dot, theta, theta_dot = state
         
         # Initialize time tracking on first call
         if self.previous_time is None:
             self.previous_time = t
-            self.previous_error = error
             dt = 0.01  # Small default dt
         else:
             dt = t - self.previous_time
             if dt <= 0:
                 dt = 0.01
         
+        # --- Angle Control (Primary) ---
+        error_theta = theta - self.theta_setpoint
+        
         # Proportional term
-        P = self.kp * error
+        P_theta = self.kp_theta * error_theta
         
         # Integral term (with anti-windup)
-        self.integral += error * dt
-        # Clamp integral to prevent windup
+        self.integral_theta += error_theta * dt
         max_integral = 100.0
-        self.integral = np.clip(self.integral, -max_integral, max_integral)
-        I = self.ki * self.integral
+        self.integral_theta = np.clip(self.integral_theta, -max_integral, max_integral)
+        I_theta = self.ki_theta * self.integral_theta
         
-        # Derivative term (using angular velocity is more stable than numerical derivative)
-        D = self.kd * theta_dot
+        # Derivative term (using angular velocity)
+        D_theta = self.kd_theta * theta_dot
         
-        # Control force (negative because we want to oppose the lean)
-        # If theta > 0 (leaning right), we need force < 0 (push left) to catch it
-        force = P + I + D
+        # Angle control force
+        force_theta = P_theta + I_theta + D_theta
+        
+        # --- Position Control (Secondary) ---
+        error_x = x - self.x_setpoint
+        
+        # Proportional term
+        P_x = self.kp_x * error_x
+        
+        # Integral term (with anti-windup)
+        self.integral_x += error_x * dt
+        self.integral_x = np.clip(self.integral_x, -max_integral, max_integral)
+        I_x = self.ki_x * self.integral_x
+        
+        # Derivative term (velocity damping)
+        D_x = self.kd_x * x_dot
+        
+        # Position control force
+        force_x = P_x + I_x + D_x
+        
+        # --- Combined Control ---
+        # Combine both controllers (angle control is primary, position is secondary)
+        # Negative sign because positive force moves cart right
+        force = force_theta + force_x
         
         # Update for next iteration
-        self.previous_error = error
         self.previous_time = t
         
-        # Optional: Add force limits to be realistic
-        max_force = 100.0  # N
+        # Apply force limits
+        max_force = 100.0
         force = np.clip(force, -max_force, max_force)
         
         return force
     
     def reset(self):
         """Reset the controller's internal state."""
-        self.integral = 0.0
-        self.previous_error = 0.0
+        self.integral_theta = 0.0
+        self.integral_x = 0.0
         self.previous_time = None
 
 

@@ -62,11 +62,13 @@ def main():
     initial_state = np.array([
         0.0,    # x: cart position (m)
         0.0,    # x_dot: cart velocity (m/s)
-        0.3,    # theta: pendulum angle (rad) - about 17 degrees
+        np.deg2rad(15.0),    # theta: pendulum angle (rad) - about 15 degrees
         0.0     # theta_dot: angular velocity (rad/s)
     ])
     
     print(f"Initial angle: {np.rad2deg(initial_state[2]):.1f} degrees")
+    print(f"Initial position: {initial_state[0]:.2f} meters")
+    print(f"Target position: {controller.x_setpoint:.2f} meters")
     
     # Run controlled simulation with noise
     print("Running PID-controlled simulation with measurement noise...")
