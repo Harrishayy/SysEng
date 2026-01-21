@@ -1,7 +1,7 @@
 """
-Main entry point for SMC-controlled cart-pole simulation.
+Main entry point for Pole Placement-controlled cart-pole simulation.
 
-Run this file to see the cart-pole stabilized using Sliding Mode Control.
+Run this file to see the cart-pole stabilized using pole placement control.
 """
 import numpy as np
 import matplotlib.pyplot as plt
@@ -10,7 +10,7 @@ from pathlib import Path
 from cart_pole import CartPole
 from simulator import Simulator
 from visualizer import Visualizer
-from controller import SMCController
+from controller import PolePlacementController
 from state_filter import NoisyStateProcessor
 
 
@@ -41,27 +41,52 @@ def main():
         seed=42                     # For reproducibility
     )
     
-    # Create SMC controller
-    controller = SMCController(
+    # Define desired closed-loop poles
+    # All poles must be in left half-plane (negative real part) for stability
+    # More negative = faster response but requires more control effort
+    # Complex conjugate pairs give oscillatory response
+    desired_poles = np.array([-3.0, -4.0, -5.0, -6.0])  # All real, stable
+    
+    # Alternative: complex conjugate pairs for slightly underdamped response
+    # desired_poles = np.array([-2+1j, -2-1j, -4+1j, -4-1j])
+    
+    # Define desired setpoint
+    setpoint = np.array([0.0, 0.0, 0.0, 0.0])  # Cart at origin, pendulum upright
+    
+    # Create Pole Placement controller
+    controller = PolePlacementController(
         cart_mass=cart_pole.M,
         pendulum_mass=cart_pole.m,
         rod_length=cart_pole.L,
         cart_friction=cart_pole.b,
         rotational_damping=cart_pole.c,
         gravity=cart_pole.g,
-        lambda_=10.0,        # Sliding surface slope
-        eta=20.0,            # Switching gain
-        phi=0.1,             # Boundary layer thickness
-        use_saturation=True  # Use smooth saturation instead of sign()
+        poles=desired_poles,
+        setpoint=setpoint
     )
     
-    # Print SMC parameters
-    params = controller.get_parameters()
-    print("SMC Parameters:")
-    print(f"  lambda (surface slope) = {params['lambda']}")
-    print(f"  eta (switching gain)   = {params['eta']}")
-    print(f"  phi (boundary layer)   = {params['phi']}")
-    print(f"  use_saturation         = {params['use_saturation']}")
+    # Print pole placement info
+    gains = controller.get_gains()
+    poles_info = controller.get_poles()
+    
+    print("Pole Placement Controller")
+    print("=" * 40)
+    print("\nDesired Poles:")
+    for i, p in enumerate(poles_info['desired']):
+        print(f"  p{i+1} = {p:.4f}")
+    
+    print("\nAchieved Poles:")
+    for i, p in enumerate(poles_info['achieved']):
+        if np.iscomplex(p) and np.imag(p) != 0:
+            print(f"  p{i+1} = {np.real(p):.4f} + {np.imag(p):.4f}j")
+        else:
+            print(f"  p{i+1} = {np.real(p):.4f}")
+    
+    print("\nState Feedback Gains K:")
+    print(f"  K_x         = {gains['k_x']:.4f}")
+    print(f"  K_x_dot     = {gains['k_x_dot']:.4f}")
+    print(f"  K_theta     = {gains['k_theta']:.4f}")
+    print(f"  K_theta_dot = {gains['k_theta_dot']:.4f}")
     
     # Print filter parameters
     filter_params = state_processor.filter.get_parameters()
@@ -71,7 +96,6 @@ def main():
     print()
     
     # Define initial conditions
-    # Starting with a moderate angle offset to test controller
     initial_state = np.array([
         0.0,    # x: cart position (m)
         0.0,    # x_dot: cart velocity (m/s)
@@ -80,9 +104,10 @@ def main():
     ])
     
     print(f"Initial angle: {np.rad2deg(initial_state[2]):.1f} degrees")
+    print(f"Initial position: {initial_state[0]:.2f} meters")
     
     # Run controlled simulation with noise
-    print("Running SMC-controlled simulation with measurement noise...")
+    print("Running Pole Placement-controlled simulation with measurement noise...")
     result = simulator.run_with_noise(
         initial_state=initial_state,
         duration=10.0,
@@ -103,48 +128,30 @@ def main():
     print("Generating state plots...")
     fig = visualizer.plot_states_with_noise(
         result,
-        save_path=plots_dir / "smc_states.png"
+        save_path=plots_dir / "pole_placement_states.png"
     )
-    fig.suptitle('SMC Controlled Cart-Pole (with noise)', fontsize=14, y=1.0)
+    fig.suptitle('Pole Placement Controlled Cart-Pole (with noise)', fontsize=14, y=1.0)
     
-    # Calculate control force and sliding surface (using filtered states)
-    print("Generating control force and sliding surface plots...")
+    # Calculate and plot control force
+    print("Generating control force plot...")
+    fig2, ax = plt.subplots(figsize=(10, 3))
     forces = []
-    sliding_surface = []
     for i in range(len(result.time)):
         t = result.time[i]
-        # Use filtered states (what controller actually received)
         state = result.filtered_states[:, i]
         force = controller.compute(state, t)
         forces.append(force)
-        sliding_surface.append(controller.get_sliding_surface(state))
     
-    # Create figure with two subplots
-    fig2, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 6), sharex=True)
-    
-    # Control force plot
-    ax1.plot(result.time, forces, 'g-', linewidth=1.5)
-    ax1.set_ylabel('Control Force (N)')
-    ax1.set_title('SMC Controller Output')
-    ax1.grid(True, alpha=0.3)
-    ax1.axhline(0, color='k', linestyle='--', alpha=0.3)
-    
-    # Sliding surface plot
-    ax2.plot(result.time, sliding_surface, 'm-', linewidth=1.5)
-    ax2.set_xlabel('Time (s)')
-    ax2.set_ylabel('Sliding Surface s')
-    ax2.set_title('Sliding Surface (s = λθ + θ̇)')
-    ax2.grid(True, alpha=0.3)
-    ax2.axhline(0, color='k', linestyle='--', alpha=0.3)
-    # Show boundary layer
-    ax2.axhline(controller.phi, color='r', linestyle=':', alpha=0.5, label=f'Boundary layer (±{controller.phi})')
-    ax2.axhline(-controller.phi, color='r', linestyle=':', alpha=0.5)
-    ax2.legend()
-    
+    ax.plot(result.time, forces, 'g-', linewidth=1.5)
+    ax.set_xlabel('Time (s)')
+    ax.set_ylabel('Control Force (N)')
+    ax.set_title('Pole Placement Controller Output')
+    ax.grid(True, alpha=0.3)
+    ax.axhline(0, color='k', linestyle='--', alpha=0.3)
     plt.tight_layout()
     
-    # Save plots
-    force_plot_path = plots_dir / "smc_control_force.png"
+    # Save control force plot
+    force_plot_path = plots_dir / "pole_placement_control_force.png"
     fig2.savefig(force_plot_path, dpi=300, bbox_inches='tight')
     print(f"Control force plot saved to {force_plot_path}")
     

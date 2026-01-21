@@ -67,8 +67,7 @@ def main():
     ])
     
     print(f"Initial angle: {np.rad2deg(initial_state[2]):.1f} degrees")
-    print(f"Initial position: {initial_state[0]:.2f} meters")
-    print(f"Target position: {controller.x_setpoint:.2f} meters")
+    print(f"Target angle: {np.rad2deg(controller.setpoint):.1f} degrees")
     
     # Run controlled simulation with noise
     print("Running PID-controlled simulation with measurement noise...")

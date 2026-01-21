@@ -1,6 +1,6 @@
 # Inverted Pendulum (Cart-Pole) Simulation
 
-A modular simulation of an inverted pendulum on a cart using numerical integration, with multiple control algorithms (PID, LQR, SMC) and realistic measurement noise with state filtering.
+A modular simulation of an inverted pendulum on a cart using numerical integration, with multiple control algorithms (PID, LQR, Pole Placement) and realistic measurement noise with state filtering.
 
 ## System Description
 
@@ -67,13 +67,13 @@ python main_lqr.py
 
 This demonstrates optimal LQR control using full state feedback. The controller gains are computed by solving the continuous-time algebraic Riccati equation (CARE) with tunable Q and R cost matrices.
 
-**SMC Controlled (robust nonlinear control):**
+**Pole Placement Controlled (direct pole specification):**
 ```bash
 cd src
-python main_smc.py
+python main_pole_placement.py
 ```
 
-This demonstrates Sliding Mode Control, a robust nonlinear controller that is insensitive to model uncertainties and disturbances. Shows state trajectories, control force, sliding surface, and animation.
+This demonstrates pole placement control where closed-loop poles are directly specified. Shows state trajectories, control force, and animation.
 
 **Note:** All simulations automatically save plots to the `plots/` directory. Plots show true states (blue), noisy measurements (red dots), and filtered estimates (green).
 
@@ -155,33 +155,32 @@ The optimal gains K are computed by solving the continuous-time algebraic Riccat
 - Guaranteed stability for small angles
 - Force saturation: ±100 N
 
-### SMC Controller
+### Pole Placement Controller
 
-Sliding Mode Control (SMC) is a robust nonlinear control technique that works in two phases:
-1. **Reaching phase:** Drive the system state to a sliding surface
-2. **Sliding phase:** Keep the system on the surface, where it converges to equilibrium
-
-**Sliding surface:**
-s = λθ + θ̇
-
-When s = 0, the pendulum angle follows θ̇ = -λθ, which decays exponentially.
+Pole Placement provides full-state feedback control by directly specifying where the closed-loop system poles should be located. This gives direct control over the system's transient response characteristics.
 
 **Control law:**
-u = u_eq + u_sw
+u = -K(x - x_setpoint)
 
-where:
-- u_eq: Equivalent control (keeps system on surface)
-- u_sw: Switching control = -η·sat(s/φ)
+The gain matrix K is computed such that the closed-loop system:
+```
+ẋ = (A - BK)x
+```
+has eigenvalues at the specified pole locations.
 
-**Parameters:**
-- λ = 10.0 (sliding surface slope)
-- η = 20.0 (switching gain)
-- φ = 0.1 (boundary layer for smooth switching)
+**Default poles:**
+- p₁ = -3, p₂ = -4, p₃ = -5, p₄ = -6 (all real, stable)
+
+**Pole selection guidelines:**
+- All poles must have negative real parts for stability
+- More negative = faster response but more control effort
+- Complex conjugate pairs give oscillatory response
+- Poles should not be too fast (actuator limits) or too slow (poor disturbance rejection)
 
 **Features:**
-- Robust to model uncertainties and disturbances
-- Finite-time reaching of sliding surface
-- Boundary layer approach reduces chattering
+- Direct specification of closed-loop dynamics
+- Full state feedback (uses all 4 states)
+- Intuitive tuning via pole locations
 - Force saturation: ±100 N
 
 ## Dependencies
