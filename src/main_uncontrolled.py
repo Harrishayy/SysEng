@@ -1,8 +1,4 @@
-"""
-Main entry point for the cart-pole simulation.
-
-Run this file to see the uncontrolled cart-pole simulation.
-"""
+"""Uncontrolled cart-pole simulation."""
 import numpy as np
 from pathlib import Path
 
@@ -13,75 +9,42 @@ from state_filter import NoisyStateProcessor
 
 
 def main():
-    # Create the cart-pole system with physical parameters
+    # System parameters
     cart_pole = CartPole(
-        cart_mass=1.0,          # kg
-        pendulum_mass=0.05,     # kg
-        rod_length=0.8,         # m
-        cart_friction=0.1,      # N/m/s
-        rotational_damping=0.01, # N*m/rad/s
-        gravity=9.81            # m/s^2
+        cart_mass=1.0, pendulum_mass=0.05, rod_length=0.8,
+        cart_friction=0.1, rotational_damping=0.01, gravity=9.81
     )
     
-    # Simulation parameters
-    dt = 0.02  # 50 Hz sampling
-    
-    # Create simulator
+    dt = 0.02  # 50 Hz
     simulator = Simulator(cart_pole)
     
-    # Create state processor (noise + filtering)
+    # Noise and filtering
     state_processor = NoisyStateProcessor(
-        position_noise_std=0.005,   # 5mm position noise
-        angle_noise_std=0.01,       # ~0.6 deg angle noise
-        tau_position=0.05,          # Position filter time constant (s)
-        tau_angle=0.02,             # Angle filter time constant (s)
-        dt=dt,
-        seed=42                     # For reproducibility
+        position_noise_std=0.005, angle_noise_std=0.01,
+        tau_position=0.05, tau_angle=0.02, dt=dt, seed=42
     )
     
-    # Print filter parameters
-    params = state_processor.filter.get_parameters()
-    print("State Filter Parameters:")
-    print(f"  Position filter: τ = {params['tau_position']:.3f}s, α = {params['alpha_position']:.4f}")
-    print(f"  Angle filter:    τ = {params['tau_angle']:.3f}s, α = {params['alpha_angle']:.4f}")
-    print()
+    # Initial state: small angle offset
+    initial_state = np.array([0.0, 0.0, 0.2, 0.0])  # ~11.5 deg
     
-    # Define initial conditions
-    # Starting with a small angle offset to observe natural dynamics
-    initial_state = np.array([
-        0.0,    # x: cart position (m)
-        0.0,    # x_dot: cart velocity (m/s)
-        0.2,    # theta: pendulum angle (rad) - about 11.5 degrees
-        0.0     # theta_dot: angular velocity (rad/s)
-    ])
-    
-    # Run simulation with noise (no control force)
-    print("Running simulation with measurement noise...")
+    print("Running uncontrolled simulation...")
     result = simulator.run_with_noise(
         initial_state=initial_state,
-        duration=10.0,
-        dt=dt,
+        duration=10.0, dt=dt,
         controller=None,
         state_processor=state_processor
     )
-    print(f"Simulation complete. {len(result.time)} timesteps.")
+    print(f"Complete. {len(result.time)} timesteps.")
     
-    # Create plots directory
+    # Save plots
     plots_dir = Path(__file__).parent.parent / "plots"
     plots_dir.mkdir(exist_ok=True)
     
-    # Create visualizer
     visualizer = Visualizer(cart_pole)
-    
-    # Plot state trajectories with noise comparison
-    print("Generating state plots...")
     visualizer.plot_states_with_noise(result, save_path=plots_dir / "uncontrolled_states.png")
     
-    # Create and display animation
     print("Creating animation...")
-    anim = visualizer.animate(result, interval=20)
-    
-    # Show all plots and animation
+    visualizer.animate(result, interval=20)
     visualizer.show()
 
 

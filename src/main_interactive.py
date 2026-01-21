@@ -1,21 +1,9 @@
-"""
-Interactive cart-pole simulation with real-time parameter adjustment.
-
-This script provides an interactive GUI using matplotlib widgets that allows
-users to:
-- Adjust controller parameters (PID gains) in real-time
-- Apply manual disturbances
-- Toggle between controllers
-- Observe the system response immediately
-
-Run this file for an interactive simulation experience.
-"""
+"""Interactive cart-pole simulation with real-time parameter adjustment."""
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.widgets import Slider, Button, RadioButtons
 from matplotlib.patches import FancyBboxPatch, Circle
 from matplotlib.animation import FuncAnimation
-from pathlib import Path
 
 from cart_pole import CartPole
 from controller import PIDController, LQRController, PolePlacementController
@@ -23,88 +11,64 @@ from state_filter import NoisyStateProcessor
 
 
 class InteractiveSimulation:
-    """
-    Interactive cart-pole simulation with real-time control.
-    """
+    """Interactive cart-pole simulation with real-time control."""
     
     def __init__(self):
-        # Create cart-pole system
         self.cart_pole = CartPole(
-            cart_mass=1.0,
-            pendulum_mass=0.05,
-            rod_length=0.8,
-            cart_friction=0.1,
-            rotational_damping=0.01,
-            gravity=9.81
+            cart_mass=1.0, pendulum_mass=0.05, rod_length=0.8,
+            cart_friction=0.1, rotational_damping=0.01, gravity=9.81
         )
         
-        # Simulation parameters
         self.dt = 0.02  # 50 Hz
+        self.state = np.array([0.0, 0.0, 0.1, 0.0])
+        self.filtered_state = self.state.copy()
         
-        # State
-        self.state = np.array([0.0, 0.0, 0.1, 0.0])  # Start with small angle
-        
-        # State processor for noise/filtering
         self.state_processor = NoisyStateProcessor(
-            position_noise_std=0.005,
-            angle_noise_std=0.01,
-            tau_position=0.05,
-            tau_angle=0.02,
-            dt=self.dt,
-            seed=None  # Different noise each run
+            position_noise_std=0.005, angle_noise_std=0.01,
+            tau_position=0.05, tau_angle=0.02, dt=self.dt, seed=None
         )
         
         # Controllers
-        self.pid_controller = PIDController(kp=100, ki=0.5, kd=20.0, setpoint=0.0)
-        
-        self.lqr_controller = LQRController(
-            cart_mass=self.cart_pole.M,
-            pendulum_mass=self.cart_pole.m,
-            rod_length=self.cart_pole.L,
-            cart_friction=self.cart_pole.b,
-            rotational_damping=self.cart_pole.c,
-            gravity=self.cart_pole.g
+        self.pid = PIDController(kp=100, ki=0.5, kd=20.0, setpoint=0.0)
+        self.lqr = LQRController(
+            cart_mass=self.cart_pole.M, pendulum_mass=self.cart_pole.m,
+            rod_length=self.cart_pole.L, cart_friction=self.cart_pole.b,
+            rotational_damping=self.cart_pole.c, gravity=self.cart_pole.g
         )
-        
-        self.pole_controller = PolePlacementController(
-            cart_mass=self.cart_pole.M,
-            pendulum_mass=self.cart_pole.m,
-            rod_length=self.cart_pole.L,
-            cart_friction=self.cart_pole.b,
-            rotational_damping=self.cart_pole.c,
-            gravity=self.cart_pole.g
+        self.pole_placement = PolePlacementController(
+            cart_mass=self.cart_pole.M, pendulum_mass=self.cart_pole.m,
+            rod_length=self.cart_pole.L, cart_friction=self.cart_pole.b,
+            rotational_damping=self.cart_pole.c, gravity=self.cart_pole.g
         )
         
         self.active_controller = 'PID'
-        
-        # Disturbance
         self.disturbance = 0.0
         self.disturbance_duration = 0
-        
-        # History for plotting
-        self.max_history = 500  # 10 seconds at 50 Hz
-        self.time_history = []
-        self.theta_history = []
-        self.x_history = []
-        self.force_history = []
-        self.disturbance_history = []
+        self.noise_enabled = True
+        self.running = True
         self.t = 0.0
         
-        # Filtered state
-        self.filtered_state = self.state.copy()
+        # History for plots
+        self.max_history = 500
+        self.time_history = []
+        self.theta_history = []
+        self.force_history = []
+        self.disturbance_history = []
         
-        # Animation running flag
-        self.running = True
+        # Visual params
+        self.cart_width = 0.4
+        self.cart_height = 0.2
+        self.wheel_radius = 0.05
+        self.bob_radius = 0.08
         
-        # Setup the figure
         self._setup_figure()
     
     def _setup_figure(self):
-        """Setup the matplotlib figure with all widgets."""
+        """Setup figure with all widgets."""
         self.fig = plt.figure(figsize=(16, 10))
         self.fig.suptitle('Interactive Cart-Pole Simulation', fontsize=14)
         
-        # Main animation axes
+        # Animation axes
         self.ax_anim = self.fig.add_axes([0.05, 0.45, 0.55, 0.5])
         self.ax_anim.set_xlim(-3, 3)
         self.ax_anim.set_ylim(-0.5, 1.5)
@@ -117,17 +81,10 @@ class InteractiveSimulation:
         self.ax_anim.axhline(y=0, color='brown', linewidth=2)
         self.ax_anim.fill_between([-3, 3], [-0.5, -0.5], [0, 0], color='burlywood', alpha=0.3)
         
-        # Cart and pendulum elements
-        self.cart_width = 0.4
-        self.cart_height = 0.2
-        self.wheel_radius = 0.05
-        self.bob_radius = 0.08
-        
-        self.cart_patch = FancyBboxPatch(
-            (0, 0), self.cart_width, self.cart_height,
-            boxstyle="round,pad=0.02",
-            facecolor='steelblue', edgecolor='darkblue', linewidth=2
-        )
+        # Cart and pendulum
+        self.cart_patch = FancyBboxPatch((0, 0), self.cart_width, self.cart_height,
+                                         boxstyle="round,pad=0.02", facecolor='steelblue',
+                                         edgecolor='darkblue', linewidth=2)
         self.ax_anim.add_patch(self.cart_patch)
         
         self.wheel_left = Circle((0, 0), self.wheel_radius, facecolor='dimgray', edgecolor='black')
@@ -139,12 +96,8 @@ class InteractiveSimulation:
         self.bob_patch = Circle((0, 0), self.bob_radius, facecolor='crimson', edgecolor='darkred', linewidth=2)
         self.ax_anim.add_patch(self.bob_patch)
         
-        # Info text
-        self.info_text = self.ax_anim.text(0.02, 0.98, '', transform=self.ax_anim.transAxes,
-                                           fontsize=10, verticalalignment='top',
-                                           bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8))
-        
-        # Disturbance arrow
+        self.info_text = self.ax_anim.text(0.02, 0.98, '', transform=self.ax_anim.transAxes, fontsize=10,
+                                           verticalalignment='top', bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8))
         self.dist_arrow = self.ax_anim.annotate('', xy=(0, 0), xytext=(0, 0),
                                                 arrowprops=dict(arrowstyle='->', color='red', lw=3))
         
@@ -187,7 +140,7 @@ class InteractiveSimulation:
         self.slider_ki.on_changed(self._on_pid_change)
         self.slider_kd.on_changed(self._on_pid_change)
         
-        # Disturbance button and slider
+        # Disturbance controls
         self.ax_dist_slider = self.fig.add_axes([0.25, 0.12, 0.25, 0.03])
         self.slider_disturbance = Slider(self.ax_dist_slider, 'Disturbance', -50, 50, valinit=0)
         
@@ -208,115 +161,84 @@ class InteractiveSimulation:
         self.ax_noise = self.fig.add_axes([0.75, 0.25, 0.15, 0.1])
         self.ax_noise.set_title('Noise')
         self.radio_noise = RadioButtons(self.ax_noise, ('On', 'Off'))
-        self.noise_enabled = True
         self.radio_noise.on_clicked(self._on_noise_toggle)
     
     def _on_controller_change(self, label):
-        """Handle controller selection change."""
         self.active_controller = label
-        self.pid_controller.reset()
+        self.pid.reset()
     
     def _on_pid_change(self, val):
-        """Handle PID gain slider changes."""
-        self.pid_controller.kp = self.slider_kp.val
-        self.pid_controller.ki = self.slider_ki.val
-        self.pid_controller.kd = self.slider_kd.val
-        self.pid_controller.reset()
+        self.pid.kp = self.slider_kp.val
+        self.pid.ki = self.slider_ki.val
+        self.pid.kd = self.slider_kd.val
+        self.pid.reset()
     
     def _on_apply_disturbance(self, event):
-        """Apply a disturbance impulse."""
         self.disturbance = self.slider_disturbance.val
-        self.disturbance_duration = 10  # Number of timesteps (0.2 seconds)
+        self.disturbance_duration = 10  # 0.2 seconds
     
     def _on_reset(self, event):
-        """Reset the simulation."""
         init_angle = np.deg2rad(self.slider_init_angle.val)
         self.state = np.array([0.0, 0.0, init_angle, 0.0])
         self.filtered_state = self.state.copy()
         self.state_processor.reset()
-        self.pid_controller.reset()
+        self.pid.reset()
         self.t = 0.0
         self.time_history.clear()
         self.theta_history.clear()
-        self.x_history.clear()
         self.force_history.clear()
         self.disturbance_history.clear()
     
     def _on_noise_toggle(self, label):
-        """Toggle noise on/off."""
         self.noise_enabled = (label == 'On')
     
     def _get_controller(self):
-        """Get the active controller."""
-        if self.active_controller == 'PID':
-            return self.pid_controller
-        elif self.active_controller == 'LQR':
-            return self.lqr_controller
-        else:
-            return self.pole_controller
+        if self.active_controller == 'PID': return self.pid
+        if self.active_controller == 'LQR': return self.lqr
+        return self.pole_placement
     
     def _compute_control(self, filtered_state, t):
-        """Compute control force from active controller."""
         controller = self._get_controller()
-        
         if self.active_controller == 'PID':
             return controller.compute(filtered_state[2], filtered_state[3], t)
-        else:
-            return controller.compute(filtered_state, t)
+        return controller.compute(filtered_state, t)
     
     def _step(self):
-        """Perform one simulation step."""
-        # Get control force
         control_force = self._compute_control(self.filtered_state, self.t)
         
-        # Get disturbance
+        dist = self.disturbance if self.disturbance_duration > 0 else 0.0
         if self.disturbance_duration > 0:
-            dist = self.disturbance
             self.disturbance_duration -= 1
-        else:
-            dist = 0.0
         
         total_force = control_force + dist
-        
-        # Integrate dynamics (simple Euler for real-time)
         state_dot = self.cart_pole.dynamics(self.t, self.state, total_force)
         self.state = self.state + state_dot * self.dt
         
-        # Add noise and filter
         if self.noise_enabled:
-            noisy, filtered = self.state_processor.process(self.state)
-            self.filtered_state = filtered
+            _, self.filtered_state = self.state_processor.process(self.state)
         else:
             self.filtered_state = self.state.copy()
         
-        # Update history
         self.t += self.dt
         self.time_history.append(self.t)
         self.theta_history.append(np.rad2deg(self.state[2]))
-        self.x_history.append(self.state[0])
         self.force_history.append(control_force)
         self.disturbance_history.append(dist)
         
-        # Trim history
         if len(self.time_history) > self.max_history:
             self.time_history.pop(0)
             self.theta_history.pop(0)
-            self.x_history.pop(0)
             self.force_history.pop(0)
             self.disturbance_history.pop(0)
         
         return control_force, dist
     
     def _update_animation(self, frame):
-        """Update animation frame."""
         if not self.running:
             return []
         
-        # Perform simulation step
         control_force, dist = self._step()
-        
-        x = self.state[0]
-        theta = self.state[2]
+        x, theta = self.state[0], self.state[2]
         
         # Update cart
         cart_x = x - self.cart_width / 2
@@ -324,74 +246,58 @@ class InteractiveSimulation:
         self.cart_patch.set_x(cart_x)
         self.cart_patch.set_y(cart_y)
         
-        # Update wheels
         self.wheel_left.center = (x - self.cart_width / 4, self.wheel_radius)
         self.wheel_right.center = (x + self.cart_width / 4, self.wheel_radius)
         
         # Update pendulum
-        pivot_x = x
-        pivot_y = cart_y + self.cart_height
+        pivot_x, pivot_y = x, cart_y + self.cart_height
         pend_x, pend_y = self.cart_pole.get_pendulum_position(self.state)
         pend_y += pivot_y
         
         self.rod_line.set_data([pivot_x, pend_x], [pivot_y, pend_y])
         self.bob_patch.center = (pend_x, pend_y)
         
-        # Update disturbance arrow
+        # Disturbance arrow
         if abs(dist) > 0.1:
-            arrow_scale = 0.02
-            self.dist_arrow.xy = (x + dist * arrow_scale, cart_y + self.cart_height / 2)
+            self.dist_arrow.xy = (x + dist * 0.02, cart_y + self.cart_height / 2)
             self.dist_arrow.xytext = (x, cart_y + self.cart_height / 2)
         else:
             self.dist_arrow.xy = (0, -10)
             self.dist_arrow.xytext = (0, -10)
         
-        # Update info text
-        info = f"Time: {self.t:.1f}s\n"
-        info += f"Angle: {np.rad2deg(theta):.1f}°\n"
-        info += f"Position: {x:.2f}m\n"
-        info += f"Controller: {self.active_controller}\n"
-        info += f"Control: {control_force:.1f}N"
+        # Info text
+        info = f"Time: {self.t:.1f}s\nAngle: {np.rad2deg(theta):.1f}°\nPos: {x:.2f}m\n{self.active_controller}\nControl: {control_force:.1f}N"
         if abs(dist) > 0.1:
-            info += f"\nDisturbance: {dist:.1f}N"
+            info += f"\nDist: {dist:.1f}N"
         self.info_text.set_text(info)
         
         # Update plots
         if self.time_history:
             t_min = max(0, self.t - 10)
-            t_max = self.t + 0.5
-            
             self.theta_line.set_data(self.time_history, self.theta_history)
-            self.ax_theta.set_xlim(t_min, t_max)
+            self.ax_theta.set_xlim(t_min, self.t + 0.5)
             
             self.force_line.set_data(self.time_history, self.force_history)
             self.dist_line.set_data(self.time_history, self.disturbance_history)
-            self.ax_force.set_xlim(t_min, t_max)
+            self.ax_force.set_xlim(t_min, self.t + 0.5)
         
         return []
     
     def run(self):
-        """Run the interactive simulation."""
-        # Create animation
-        self.anim = FuncAnimation(
-            self.fig, self._update_animation,
-            interval=int(self.dt * 1000),  # Convert to milliseconds
-            blit=False
-        )
-        
+        self.anim = FuncAnimation(self.fig, self._update_animation,
+                                  interval=int(self.dt * 1000), blit=False)
         plt.show()
 
 
 def main():
-    print("Starting Interactive Cart-Pole Simulation...")
-    print("=" * 50)
+    print("Interactive Cart-Pole Simulation")
+    print("=" * 40)
     print("Controls:")
-    print("  - Controller: Select PID, LQR, or Pole Placement")
-    print("  - PID sliders: Adjust Kp, Ki, Kd gains in real-time")
-    print("  - Disturbance: Set magnitude and click 'Apply Impulse'")
-    print("  - Init Angle: Set initial angle before clicking 'Reset'")
-    print("  - Noise: Toggle measurement noise on/off")
-    print("=" * 50)
+    print("  - Select controller: PID / LQR / Pole Placement")
+    print("  - Adjust PID gains with sliders")
+    print("  - Apply disturbance impulses")
+    print("  - Toggle noise on/off")
+    print("=" * 40)
     
     sim = InteractiveSimulation()
     sim.run()

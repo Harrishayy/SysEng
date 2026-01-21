@@ -1,8 +1,4 @@
-"""
-Main entry point for Pole Placement-controlled cart-pole simulation.
-
-Run this file to see the cart-pole stabilized using pole placement control.
-"""
+"""Pole Placement-controlled cart-pole simulation."""
 import numpy as np
 import matplotlib.pyplot as plt
 from pathlib import Path
@@ -15,132 +11,69 @@ from state_filter import NoisyStateProcessor
 
 
 def main():
-    # Create the cart-pole system with physical parameters
+    # System parameters
     cart_pole = CartPole(
-        cart_mass=1.0,          # kg
-        pendulum_mass=0.05,     # kg
-        rod_length=0.8,         # m
-        cart_friction=0.1,      # N/m/s
-        rotational_damping=0.01, # N*m/rad/s
-        gravity=9.81            # m/s^2
+        cart_mass=1.0, pendulum_mass=0.05, rod_length=0.8,
+        cart_friction=0.1, rotational_damping=0.01, gravity=9.81
     )
     
-    # Simulation parameters
-    dt = 0.02  # 50 Hz sampling
-    
-    # Create simulator
+    dt = 0.02  # 50 Hz
     simulator = Simulator(cart_pole)
     
-    # Create state processor (noise + filtering)
+    # Noise and filtering
     state_processor = NoisyStateProcessor(
-        position_noise_std=0.005,   # 5mm position noise
-        angle_noise_std=0.01,       # ~0.6 deg angle noise
-        tau_position=0.05,          # Position filter time constant (s)
-        tau_angle=0.02,             # Angle filter time constant (s)
-        dt=dt,
-        seed=42                     # For reproducibility
+        position_noise_std=0.005, angle_noise_std=0.01,
+        tau_position=0.05, tau_angle=0.02, dt=dt, seed=42
     )
     
-    # Define desired closed-loop poles
-    # All poles must be in left half-plane (negative real part) for stability
-    # More negative = faster response but requires more control effort
-    # Complex conjugate pairs give oscillatory response
+    # Pole placement controller
     desired_poles = np.array([-3.0, -4.0, -5.0, -6.0])  # All real, stable
+    setpoint = np.array([0.0, 0.0, 0.0, 0.0])
     
-    # Alternative: complex conjugate pairs for slightly underdamped response
-    # desired_poles = np.array([-2+1j, -2-1j, -4+1j, -4-1j])
-    
-    # Define desired setpoint
-    setpoint = np.array([0.0, 0.0, 0.0, 0.0])  # Cart at origin, pendulum upright
-    
-    # Create Pole Placement controller
     controller = PolePlacementController(
-        cart_mass=cart_pole.M,
-        pendulum_mass=cart_pole.m,
-        rod_length=cart_pole.L,
-        cart_friction=cart_pole.b,
-        rotational_damping=cart_pole.c,
-        gravity=cart_pole.g,
-        poles=desired_poles,
-        setpoint=setpoint
+        cart_mass=cart_pole.M, pendulum_mass=cart_pole.m,
+        rod_length=cart_pole.L, cart_friction=cart_pole.b,
+        rotational_damping=cart_pole.c, gravity=cart_pole.g,
+        poles=desired_poles, setpoint=setpoint
     )
     
-    # Print pole placement info
+    # Print controller info
     gains = controller.get_gains()
     poles_info = controller.get_poles()
     
     print("Pole Placement Controller")
     print("=" * 40)
-    print("\nDesired Poles:")
-    for i, p in enumerate(poles_info['desired']):
-        print(f"  p{i+1} = {p:.4f}")
+    print("\nDesired Poles:", [f"{p:.2f}" for p in poles_info['desired']])
+    print("Achieved Poles:", [f"{np.real(p):.2f}" for p in poles_info['achieved']])
+    print("\nGains:", {k: f"{v:.4f}" for k, v in gains.items()})
     
-    print("\nAchieved Poles:")
-    for i, p in enumerate(poles_info['achieved']):
-        if np.iscomplex(p) and np.imag(p) != 0:
-            print(f"  p{i+1} = {np.real(p):.4f} + {np.imag(p):.4f}j")
-        else:
-            print(f"  p{i+1} = {np.real(p):.4f}")
+    # Initial state: 17 deg offset
+    initial_state = np.array([0.0, 0.0, 0.3, 0.0])
     
-    print("\nState Feedback Gains K:")
-    print(f"  K_x         = {gains['k_x']:.4f}")
-    print(f"  K_x_dot     = {gains['k_x_dot']:.4f}")
-    print(f"  K_theta     = {gains['k_theta']:.4f}")
-    print(f"  K_theta_dot = {gains['k_theta_dot']:.4f}")
+    print(f"\nInitial angle: {np.rad2deg(initial_state[2]):.1f}°")
+    print("Running Pole Placement simulation...")
     
-    # Print filter parameters
-    filter_params = state_processor.filter.get_parameters()
-    print("\nState Filter Parameters:")
-    print(f"  Position filter: τ = {filter_params['tau_position']:.3f}s, α = {filter_params['alpha_position']:.4f}")
-    print(f"  Angle filter:    τ = {filter_params['tau_angle']:.3f}s, α = {filter_params['alpha_angle']:.4f}")
-    print()
-    
-    # Define initial conditions
-    initial_state = np.array([
-        0.0,    # x: cart position (m)
-        0.0,    # x_dot: cart velocity (m/s)
-        0.3,    # theta: pendulum angle (rad) - about 17 degrees
-        0.0     # theta_dot: angular velocity (rad/s)
-    ])
-    
-    print(f"Initial angle: {np.rad2deg(initial_state[2]):.1f} degrees")
-    print(f"Initial position: {initial_state[0]:.2f} meters")
-    
-    # Run controlled simulation with noise
-    print("Running Pole Placement-controlled simulation with measurement noise...")
     result = simulator.run_with_noise(
         initial_state=initial_state,
-        duration=10.0,
-        dt=dt,
+        duration=10.0, dt=dt,
         controller=controller,
         state_processor=state_processor
     )
-    print(f"Simulation complete. {len(result.time)} timesteps.")
+    print(f"Complete. {len(result.time)} timesteps.")
     
-    # Create plots directory
+    # Save plots
     plots_dir = Path(__file__).parent.parent / "plots"
     plots_dir.mkdir(exist_ok=True)
     
-    # Create visualizer
     visualizer = Visualizer(cart_pole)
     
-    # Plot state trajectories with noise comparison
-    print("Generating state plots...")
-    fig = visualizer.plot_states_with_noise(
-        result,
-        save_path=plots_dir / "pole_placement_states.png"
-    )
-    fig.suptitle('Pole Placement Controlled Cart-Pole (with noise)', fontsize=14, y=1.0)
+    fig = visualizer.plot_states_with_noise(result, save_path=plots_dir / "pole_placement_states.png")
+    fig.suptitle('Pole Placement Controlled Cart-Pole', fontsize=14, y=1.0)
     
-    # Calculate and plot control force
-    print("Generating control force plot...")
+    # Control force plot
     fig2, ax = plt.subplots(figsize=(10, 3))
-    forces = []
-    for i in range(len(result.time)):
-        t = result.time[i]
-        state = result.filtered_states[:, i]
-        force = controller.compute(state, t)
-        forces.append(force)
+    forces = [controller.compute(result.filtered_states[:, i], result.time[i])
+              for i in range(len(result.time))]
     
     ax.plot(result.time, forces, 'g-', linewidth=1.5)
     ax.set_xlabel('Time (s)')
@@ -149,17 +82,10 @@ def main():
     ax.grid(True, alpha=0.3)
     ax.axhline(0, color='k', linestyle='--', alpha=0.3)
     plt.tight_layout()
+    fig2.savefig(plots_dir / "pole_placement_control_force.png", dpi=300, bbox_inches='tight')
     
-    # Save control force plot
-    force_plot_path = plots_dir / "pole_placement_control_force.png"
-    fig2.savefig(force_plot_path, dpi=300, bbox_inches='tight')
-    print(f"Control force plot saved to {force_plot_path}")
-    
-    # Create and display animation
     print("Creating animation...")
-    anim = visualizer.animate(result, interval=20)
-    
-    # Show all plots and animation
+    visualizer.animate(result, interval=20)
     visualizer.show()
 
 
