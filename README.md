@@ -1,6 +1,6 @@
 # Inverted Pendulum (Cart-Pole) Simulation
 
-A modular simulation of an inverted pendulum on a cart using numerical integration, with optional PID control for stabilization.
+A modular simulation of an inverted pendulum on a cart using numerical integration, with multiple control algorithms (PID, LQR, SMC) and realistic measurement noise with state filtering.
 
 ## System Description
 
@@ -25,6 +25,7 @@ src/
 ├── simulator.py         # Simulator class - numerical integration using scipy
 ├── visualizer.py        # Visualizer class - state plots and animated visualization
 ├── controller.py        # PIDController, LQRController, and SMCController classes
+├── state_filter.py      # Measurement noise and two-stage state filtering
 ├── main_uncontrolled.py # Uncontrolled/passive simulation
 ├── main_pid.py          # PID-controlled simulation
 ├── main_lqr.py          # LQR-controlled simulation
@@ -74,7 +75,44 @@ python main_smc.py
 
 This demonstrates Sliding Mode Control, a robust nonlinear controller that is insensitive to model uncertainties and disturbances. Shows state trajectories, control force, sliding surface, and animation.
 
-**Note:** All simulations automatically save plots to the `plots/` directory.
+**Note:** All simulations automatically save plots to the `plots/` directory. Plots show true states (blue), noisy measurements (red dots), and filtered estimates (green).
+
+## Measurement Noise and State Filtering
+
+All simulations include realistic measurement noise and a two-stage state filtering approach:
+
+### Measurement Noise
+- **Position noise:** σ = 5mm (Gaussian)
+- **Angle noise:** σ = 0.01 rad ≈ 0.6° (Gaussian)
+
+Noise is added to position measurements (x and θ), simulating encoder noise. Velocities are not directly measured.
+
+### Two-Stage State Filter
+
+**Stage 1: Low-pass filtering of position**
+
+The continuous-time first-order low-pass filter:
+```
+τ·ẏ(t) + y(t) = x(t)
+```
+
+In discrete time with sampling period Ts:
+```
+y[k] = α·y[k-1] + (1-α)·x[k]
+```
+where the smoothing factor α = τ/(τ + Ts)
+
+**Stage 2: Velocity estimation (dirty derivative)**
+```
+ẏ[k] = (y[k] - y[k-1]) / Ts
+```
+
+**Default filter parameters:**
+- Position filter: τ = 0.05s (α ≈ 0.714)
+- Angle filter: τ = 0.02s (α ≈ 0.5)
+- Sampling period: Ts = 0.02s (50 Hz)
+
+This two-stage approach provides smooth position estimates and velocity estimates with reduced sensitivity to measurement noise.
 
 ## Control Algorithms
 

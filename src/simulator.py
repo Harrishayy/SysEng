@@ -3,7 +3,7 @@ Simulator class for running cart-pole simulations.
 """
 import numpy as np
 from scipy.integrate import solve_ivp
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Callable, Optional, Union
 
 from cart_pole import CartPole
@@ -13,7 +13,9 @@ from cart_pole import CartPole
 class SimulationResult:
     """Container for simulation results."""
     time: np.ndarray
-    states: np.ndarray  # Shape: (4, n_timesteps)
+    states: np.ndarray  # Shape: (4, n_timesteps) - True states
+    noisy_states: np.ndarray = None    # Noisy measurements (if noise enabled)
+    filtered_states: np.ndarray = None  # Filtered states (if noise enabled)
     
     @property
     def x(self) -> np.ndarray:
@@ -116,4 +118,114 @@ class Simulator:
         return SimulationResult(
             time=solution.t,
             states=solution.y
+        )
+    
+    def run_with_noise(
+        self,
+        initial_state: np.ndarray,
+        duration: float,
+        dt: float = 0.02,
+        controller: Optional[object] = None,
+        state_processor: Optional[object] = None,
+        method: str = 'RK45'
+    ) -> SimulationResult:
+        """
+        Run simulation with measurement noise and state filtering.
+        
+        Uses discrete time stepping to properly simulate:
+        1. True dynamics integration
+        2. Noisy measurements
+        3. Filtered state estimation
+        4. Controller using filtered states
+        
+        Args:
+            initial_state: Initial state [x, x_dot, theta, theta_dot]
+            duration: Simulation duration (s)
+            dt: Time step (s)
+            controller: Controller object with compute() method
+            state_processor: NoisyStateProcessor for noise and filtering
+            method: Integration method for each step
+            
+        Returns:
+            SimulationResult with true, noisy, and filtered states
+        """
+        import inspect
+        
+        # Initialize storage
+        n_steps = int(duration / dt) + 1
+        time = np.zeros(n_steps)
+        true_states = np.zeros((4, n_steps))
+        noisy_states = np.zeros((4, n_steps))
+        filtered_states = np.zeros((4, n_steps))
+        
+        # Initial conditions
+        state = initial_state.copy()
+        true_states[:, 0] = state
+        time[0] = 0.0
+        
+        # Reset filter if provided
+        if state_processor is not None:
+            state_processor.reset()
+            noisy, filtered = state_processor.process(state)
+            noisy_states[:, 0] = noisy
+            filtered_states[:, 0] = filtered
+        else:
+            noisy_states[:, 0] = state
+            filtered_states[:, 0] = state
+        
+        # Determine controller signature
+        controller_uses_state = False
+        if controller is not None and hasattr(controller, 'compute'):
+            sig = inspect.signature(controller.compute)
+            n_params = len(sig.parameters)
+            controller_uses_state = (n_params == 2)  # (state, t)
+        
+        # Simulate step by step
+        for k in range(1, n_steps):
+            t = (k - 1) * dt
+            
+            # Get control force based on filtered state (what controller "sees")
+            if controller is not None:
+                if controller_uses_state:
+                    force = controller.compute(filtered_states[:, k-1], t)
+                else:
+                    # PID controller uses (theta, theta_dot, t)
+                    force = controller.compute(
+                        filtered_states[2, k-1],  # theta
+                        filtered_states[3, k-1],  # theta_dot
+                        t
+                    )
+            else:
+                force = 0.0
+            
+            # Integrate true dynamics for one time step
+            def dynamics(t_inner, s):
+                return self.cart_pole.dynamics(t_inner, s, force)
+            
+            sol = solve_ivp(
+                fun=dynamics,
+                t_span=(t, t + dt),
+                y0=state,
+                method=method
+            )
+            
+            # Update true state
+            state = sol.y[:, -1]
+            true_states[:, k] = state
+            time[k] = t + dt
+            
+            # Process measurements (add noise and filter)
+            if state_processor is not None:
+                noisy, filtered = state_processor.process(state)
+                noisy_states[:, k] = noisy
+                filtered_states[:, k] = filtered
+            else:
+                noisy_states[:, k] = state
+                filtered_states[:, k] = state
+        
+        return SimulationResult(
+            time=time,
+            states=true_states,
+            noisy_states=noisy_states,
+            filtered_states=filtered_states
         )

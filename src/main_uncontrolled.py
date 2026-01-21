@@ -9,6 +9,7 @@ from pathlib import Path
 from cart_pole import CartPole
 from simulator import Simulator
 from visualizer import Visualizer
+from state_filter import NoisyStateProcessor
 
 
 def main():
@@ -22,8 +23,28 @@ def main():
         gravity=9.81            # m/s^2
     )
     
+    # Simulation parameters
+    dt = 0.02  # 50 Hz sampling
+    
     # Create simulator
     simulator = Simulator(cart_pole)
+    
+    # Create state processor (noise + filtering)
+    state_processor = NoisyStateProcessor(
+        position_noise_std=0.005,   # 5mm position noise
+        angle_noise_std=0.01,       # ~0.6 deg angle noise
+        tau_position=0.05,          # Position filter time constant (s)
+        tau_angle=0.02,             # Angle filter time constant (s)
+        dt=dt,
+        seed=42                     # For reproducibility
+    )
+    
+    # Print filter parameters
+    params = state_processor.filter.get_parameters()
+    print("State Filter Parameters:")
+    print(f"  Position filter: τ = {params['tau_position']:.3f}s, α = {params['alpha_position']:.4f}")
+    print(f"  Angle filter:    τ = {params['tau_angle']:.3f}s, α = {params['alpha_angle']:.4f}")
+    print()
     
     # Define initial conditions
     # Starting with a small angle offset to observe natural dynamics
@@ -34,12 +55,14 @@ def main():
         0.0     # theta_dot: angular velocity (rad/s)
     ])
     
-    # Run simulation (no control force)
-    print("Running simulation...")
-    result = simulator.run(
+    # Run simulation with noise (no control force)
+    print("Running simulation with measurement noise...")
+    result = simulator.run_with_noise(
         initial_state=initial_state,
-        duration=10.0,  # seconds
-        dt=0.02         # 50 Hz output
+        duration=10.0,
+        dt=dt,
+        controller=None,
+        state_processor=state_processor
     )
     print(f"Simulation complete. {len(result.time)} timesteps.")
     
@@ -50,9 +73,9 @@ def main():
     # Create visualizer
     visualizer = Visualizer(cart_pole)
     
-    # Plot state trajectories
+    # Plot state trajectories with noise comparison
     print("Generating state plots...")
-    visualizer.plot_states(result, save_path=plots_dir / "uncontrolled_states.png")
+    visualizer.plot_states_with_noise(result, save_path=plots_dir / "uncontrolled_states.png")
     
     # Create and display animation
     print("Creating animation...")

@@ -11,6 +11,7 @@ from cart_pole import CartPole
 from simulator import Simulator
 from visualizer import Visualizer
 from controller import PIDController
+from state_filter import NoisyStateProcessor
 
 
 def main():
@@ -24,8 +25,21 @@ def main():
         gravity=9.81            # m/s^2
     )
     
+    # Simulation parameters
+    dt = 0.02  # 50 Hz sampling
+    
     # Create simulator
     simulator = Simulator(cart_pole)
+    
+    # Create state processor (noise + filtering)
+    state_processor = NoisyStateProcessor(
+        position_noise_std=0.005,   # 5mm position noise
+        angle_noise_std=0.01,       # ~0.6 deg angle noise
+        tau_position=0.05,          # Position filter time constant (s)
+        tau_angle=0.02,             # Angle filter time constant (s)
+        dt=dt,
+        seed=42                     # For reproducibility
+    )
     
     # Create PID controller
     # Tuned gains for this system
@@ -35,6 +49,13 @@ def main():
         kd=20.0,    # Derivative gain
         setpoint=0.0  # Target: upright position
     )
+    
+    # Print filter parameters
+    params = state_processor.filter.get_parameters()
+    print("State Filter Parameters:")
+    print(f"  Position filter: τ = {params['tau_position']:.3f}s, α = {params['alpha_position']:.4f}")
+    print(f"  Angle filter:    τ = {params['tau_angle']:.3f}s, α = {params['alpha_angle']:.4f}")
+    print()
     
     # Define initial conditions
     # Starting with a moderate angle offset to test controller
@@ -47,13 +68,14 @@ def main():
     
     print(f"Initial angle: {np.rad2deg(initial_state[2]):.1f} degrees")
     
-    # Run controlled simulation
-    print("Running controlled simulation...")
-    result = simulator.run(
+    # Run controlled simulation with noise
+    print("Running PID-controlled simulation with measurement noise...")
+    result = simulator.run_with_noise(
         initial_state=initial_state,
         duration=10.0,
-        dt=0.02,
-        controller=controller
+        dt=dt,
+        controller=controller,
+        state_processor=state_processor
     )
     print(f"Simulation complete. {len(result.time)} timesteps.")
     
@@ -64,23 +86,24 @@ def main():
     # Create visualizer
     visualizer = Visualizer(cart_pole)
     
-    # Plot state trajectories
+    # Plot state trajectories with noise comparison
     print("Generating state plots...")
-    fig = visualizer.plot_states(
+    fig = visualizer.plot_states_with_noise(
         result,
         save_path=plots_dir / "pid_states.png"
     )
-    fig.suptitle('PID Controlled Cart-Pole', fontsize=14, y=1.0)
+    fig.suptitle('PID Controlled Cart-Pole (with noise)', fontsize=14, y=1.0)
     
-    # Calculate and plot control force
+    # Calculate and plot control force (using filtered states as controller sees them)
     print("Generating control force plot...")
     fig2, ax = plt.subplots(figsize=(10, 3))
     forces = []
     controller.reset()  # Reset controller state
     for i in range(len(result.time)):
         t = result.time[i]
-        theta = result.theta[i]
-        theta_dot = result.theta_dot[i]
+        # Use filtered states (what controller actually received)
+        theta = result.filtered_states[2, i]
+        theta_dot = result.filtered_states[3, i]
         force = controller.compute(theta, theta_dot, t)
         forces.append(force)
     

@@ -76,6 +76,69 @@ class Visualizer:
         
         return fig
     
+    def plot_states_with_noise(
+        self,
+        result: SimulationResult,
+        figsize: tuple = (12, 10),
+        save_path: Optional[str] = None
+    ) -> plt.Figure:
+        """
+        Plot true, noisy, and filtered states for comparison.
+        
+        Args:
+            result: SimulationResult with noisy_states and filtered_states
+            figsize: Figure size
+            save_path: Optional path to save the figure
+            
+        Returns:
+            Matplotlib figure
+        """
+        if result.noisy_states is None or result.filtered_states is None:
+            raise ValueError("SimulationResult must contain noisy_states and filtered_states")
+        
+        fig, axes = plt.subplots(4, 1, figsize=figsize, sharex=True)
+        
+        # Cart position
+        axes[0].plot(result.time, result.states[0], 'b-', linewidth=1.5, label='True', alpha=0.8)
+        axes[0].plot(result.time, result.noisy_states[0], 'r.', markersize=1, label='Noisy', alpha=0.3)
+        axes[0].plot(result.time, result.filtered_states[0], 'g-', linewidth=1.5, label='Filtered', alpha=0.8)
+        axes[0].set_ylabel('Cart Position (m)')
+        axes[0].grid(True, alpha=0.3)
+        axes[0].set_title('State Estimation: True vs Noisy vs Filtered')
+        axes[0].legend(loc='upper right')
+        
+        # Cart velocity
+        axes[1].plot(result.time, result.states[1], 'b-', linewidth=1.5, label='True', alpha=0.8)
+        axes[1].plot(result.time, result.filtered_states[1], 'g-', linewidth=1.5, label='Estimated', alpha=0.8)
+        axes[1].set_ylabel('Cart Velocity (m/s)')
+        axes[1].grid(True, alpha=0.3)
+        axes[1].legend(loc='upper right')
+        
+        # Pendulum angle
+        axes[2].plot(result.time, np.rad2deg(result.states[2]), 'b-', linewidth=1.5, label='True', alpha=0.8)
+        axes[2].plot(result.time, np.rad2deg(result.noisy_states[2]), 'r.', markersize=1, label='Noisy', alpha=0.3)
+        axes[2].plot(result.time, np.rad2deg(result.filtered_states[2]), 'g-', linewidth=1.5, label='Filtered', alpha=0.8)
+        axes[2].axhline(0, color='k', linestyle='--', alpha=0.3)
+        axes[2].set_ylabel('Angle (deg)')
+        axes[2].grid(True, alpha=0.3)
+        axes[2].legend(loc='upper right')
+        
+        # Pendulum angular velocity
+        axes[3].plot(result.time, np.rad2deg(result.states[3]), 'b-', linewidth=1.5, label='True', alpha=0.8)
+        axes[3].plot(result.time, np.rad2deg(result.filtered_states[3]), 'g-', linewidth=1.5, label='Estimated', alpha=0.8)
+        axes[3].set_ylabel('Angular Vel (deg/s)')
+        axes[3].set_xlabel('Time (s)')
+        axes[3].grid(True, alpha=0.3)
+        axes[3].legend(loc='upper right')
+        
+        plt.tight_layout()
+        
+        if save_path:
+            fig.savefig(save_path, dpi=300, bbox_inches='tight')
+            print(f"State plot saved to {save_path}")
+        
+        return fig
+    
     def animate(
         self,
         result: SimulationResult,
