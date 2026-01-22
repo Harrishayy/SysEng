@@ -176,12 +176,12 @@ class InteractiveSimulation:
         self.slider_init_angle = Slider(self.ax_init_angle, 'Init Angle (deg)', -45, 45, valinit=5.7)
         
         # Toggles
-        self.ax_noise = self.fig.add_axes([0.75, 0.22, 0.1, 0.1])
+        self.ax_noise = self.fig.add_axes([0.75, 0.05, 0.1, 0.1])
         self.ax_noise.set_title('Noise')
         self.radio_noise = RadioButtons(self.ax_noise, ('On', 'Off'))
         self.radio_noise.on_clicked(self._on_noise_toggle)
         
-        self.ax_motor = self.fig.add_axes([0.87, 0.22, 0.1, 0.1])
+        self.ax_motor = self.fig.add_axes([0.87, 0.05, 0.1, 0.1])
         self.ax_motor.set_title('Motor')
         self.radio_motor = RadioButtons(self.ax_motor, ('On', 'Off'))
         self.radio_motor.on_clicked(self._on_motor_toggle)
