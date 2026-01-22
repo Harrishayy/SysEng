@@ -59,20 +59,25 @@ Generates 5 comparison plots in `/plots`:
 
 ## Control Algorithms
 
+All controllers have dual objectives:
+1. Keep pendulum upright (θ = 0)
+2. Move cart to target position (x = 2m)
+
 ### PID Controller
-Angle-only feedback with proportional, integral, and derivative terms.
-- Default gains: Kp=100, Ki=0.5, Kd=20
-- Integral anti-windup, force saturation ±100N
+Cascaded control: position error → angle setpoint → force.
+- Outer loop: position PD generates desired tilt angle
+- Inner loop: angle PID stabilizes to that setpoint
+- Default gains: Kp=100, Ki=0.5, Kd=20, Kp_pos=0.3, Kd_pos=0.5
 
 ### LQR Controller
 Optimal full-state feedback minimizing J = ∫(x'Qx + u'Ru)dt.
 - Default: Q = diag([1, 1, 100, 10]), R = 0.1
-- Gains computed via continuous-time algebraic Riccati equation
+- Setpoint: [2, 0, 0, 0] (x=2m, stationary, upright)
 
 ### Pole Placement Controller
 Full-state feedback with directly specified closed-loop poles.
 - Default poles: [-2, -3, -4, -5]
-- All poles negative for stability
+- Setpoint: [2, 0, 0, 0] (x=2m, stationary, upright)
 
 ## DC Motor Model
 

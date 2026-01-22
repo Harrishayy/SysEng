@@ -5,19 +5,38 @@ from scipy.signal import place_poles
 
 
 class PIDController:
-    """PID controller for angle stabilization."""
+    """Cascaded PID: position error → angle setpoint → force."""
     
-    def __init__(self, kp: float = 100.0, ki: float = 0.5, kd: float = 20.0, setpoint: float = 0.0):
+    def __init__(
+        self,
+        kp: float = 35.0,
+        ki: float = 0.5,
+        kd: float = 12.0,
+        kp_pos: float = 0.08,
+        ki_pos: float = 0.02,
+        kd_pos: float = 1.0,
+        x_target: float = 2.0,
+        max_angle_setpoint: float = 0.12
+    ):
+        # Angle PID gains
         self.kp = kp
         self.ki = ki
         self.kd = kd
-        self.setpoint = setpoint
+        
+        # Position control gains (outer loop)
+        self.kp_pos = kp_pos
+        self.ki_pos = ki_pos
+        self.kd_pos = kd_pos
+        self.x_target = x_target
+        self.max_angle_setpoint = max_angle_setpoint
+        
         self.integral = 0.0
+        self.pos_integral = 0.0
         self.previous_time = None
     
-    def compute(self, theta: float, theta_dot: float, t: float) -> float:
-        """Compute control force from angle error."""
-        error = theta - self.setpoint
+    def compute(self, state: np.ndarray, t: float) -> float:
+        """Compute control force using cascaded position → angle control."""
+        x, x_dot, theta, theta_dot = state
         
         # Time step
         if self.previous_time is None:
@@ -26,9 +45,20 @@ class PIDController:
         else:
             dt = max(t - self.previous_time, 0.01)
         
+        # Outer loop: position PID → desired angle
+        pos_error = self.x_target - x
+        self.pos_integral = np.clip(self.pos_integral + pos_error * dt, -10.0, 10.0)
+        angle_setpoint = (self.kp_pos * pos_error + 
+                         self.ki_pos * self.pos_integral - 
+                         self.kd_pos * x_dot)
+        angle_setpoint = np.clip(angle_setpoint, -self.max_angle_setpoint, self.max_angle_setpoint)
+        
+        # Inner loop: angle PID
+        angle_error = theta - angle_setpoint
+        
         # PID terms
-        P = self.kp * error
-        self.integral = np.clip(self.integral + error * dt, -100.0, 100.0)
+        P = self.kp * angle_error
+        self.integral = np.clip(self.integral + angle_error * dt, -100.0, 100.0)
         I = self.ki * self.integral
         D = self.kd * theta_dot
         
@@ -39,6 +69,7 @@ class PIDController:
     def reset(self):
         """Reset internal state."""
         self.integral = 0.0
+        self.pos_integral = 0.0
         self.previous_time = None
 
 
@@ -64,10 +95,10 @@ class LQRController:
         self.c = rotational_damping
         self.g = gravity
         
-        # Cost matrices
-        self.Q = Q if Q is not None else np.diag([1.0, 1.0, 100.0, 10.0])
-        self.R = R if R is not None else np.array([[0.1]])
-        self.setpoint = np.array(setpoint if setpoint is not None else [0.0, 0.0, 0.0, 0.0])
+        # Cost matrices (tuned for ~6N motor limit)
+        self.Q = Q if Q is not None else np.diag([8.0, 3.0, 50.0, 5.0])
+        self.R = R if R is not None else np.array([[0.3]])
+        self.setpoint = np.array(setpoint if setpoint is not None else [2.0, 0.0, 0.0, 0.0])
         
         # Compute gains
         self.A, self.B = self._linearize_system()
@@ -130,8 +161,8 @@ class PolePlacementController:
         self.c = rotational_damping
         self.g = gravity
         
-        self.desired_poles = np.array(poles if poles is not None else [-2.0, -3.0, -4.0, -5.0])
-        self.setpoint = np.array(setpoint if setpoint is not None else [0.0, 0.0, 0.0, 0.0])
+        self.desired_poles = np.array(poles if poles is not None else [-2.0, -2.5, -3.0, -3.5])
+        self.setpoint = np.array(setpoint if setpoint is not None else [2.0, 0.0, 0.0, 0.0])
         
         self.A, self.B = self._linearize_system()
         self.K = self._compute_pole_placement_gain()

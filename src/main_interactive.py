@@ -36,8 +36,8 @@ class InteractiveSimulation:
             tau_position=0.1, tau_angle=0.08, dt=self.dt, seed=None
         )
         
-        # Controllers
-        self.pid = PIDController(kp=100, ki=0.5, kd=20.0, setpoint=0.0)
+        # Controllers (all target x=2m)
+        self.pid = PIDController(kp=35, ki=0.5, kd=12.0, x_target=2.0)
         self.lqr = LQRController(
             cart_mass=self.cart_pole.M, pendulum_mass=self.cart_pole.m,
             rod_length=self.cart_pole.L, cart_friction=self.cart_pole.b,
@@ -61,6 +61,7 @@ class InteractiveSimulation:
         self.max_history = 500
         self.time_history = []
         self.theta_history = []
+        self.position_history = []
         self.desired_force_history = []
         self.actual_force_history = []
         self.voltage_history = []
@@ -111,7 +112,7 @@ class InteractiveSimulation:
                                                 arrowprops=dict(arrowstyle='->', color='red', lw=3))
         
         # Real-time plots
-        self.ax_theta = self.fig.add_axes([0.65, 0.75, 0.32, 0.15])
+        self.ax_theta = self.fig.add_axes([0.65, 0.78, 0.32, 0.12])
         self.ax_theta.set_ylabel('Angle (deg)')
         self.ax_theta.set_xlim(0, 10)
         self.ax_theta.set_ylim(-30, 30)
@@ -119,7 +120,16 @@ class InteractiveSimulation:
         self.ax_theta.axhline(0, color='k', linestyle='--', alpha=0.3)
         self.theta_line, = self.ax_theta.plot([], [], 'r-', linewidth=1.5)
         
-        self.ax_force = self.fig.add_axes([0.65, 0.55, 0.32, 0.15])
+        self.ax_position = self.fig.add_axes([0.65, 0.63, 0.32, 0.12])
+        self.ax_position.set_ylabel('Position (m)')
+        self.ax_position.set_xlim(0, 10)
+        self.ax_position.set_ylim(-3, 3)
+        self.ax_position.grid(True, alpha=0.3)
+        self.ax_position.axhline(2.0, color='g', linestyle='--', alpha=0.5, label='Target')
+        self.ax_position.axhline(0, color='k', linestyle='--', alpha=0.3)
+        self.position_line, = self.ax_position.plot([], [], 'b-', linewidth=1.5)
+        
+        self.ax_force = self.fig.add_axes([0.65, 0.48, 0.32, 0.12])
         self.ax_force.set_ylabel('Force (N)')
         self.ax_force.set_xlim(0, 10)
         self.ax_force.set_ylim(-50, 50)
@@ -129,7 +139,7 @@ class InteractiveSimulation:
         self.actual_line, = self.ax_force.plot([], [], 'g-', linewidth=1.5, label='Motor')
         self.ax_force.legend(loc='upper right', fontsize=8)
         
-        self.ax_voltage = self.fig.add_axes([0.65, 0.38, 0.32, 0.12])
+        self.ax_voltage = self.fig.add_axes([0.65, 0.35, 0.32, 0.10])
         self.ax_voltage.set_ylabel('Voltage (V)')
         self.ax_voltage.set_xlabel('Time (s)')
         self.ax_voltage.set_xlim(0, 10)
@@ -146,17 +156,61 @@ class InteractiveSimulation:
         self.radio_controller.on_clicked(self._on_controller_change)
         
         # PID sliders
+        self.pid_axes = []
         self.ax_kp = self.fig.add_axes([0.25, 0.32, 0.25, 0.03])
         self.ax_ki = self.fig.add_axes([0.25, 0.27, 0.25, 0.03])
         self.ax_kd = self.fig.add_axes([0.25, 0.22, 0.25, 0.03])
+        self.pid_axes = [self.ax_kp, self.ax_ki, self.ax_kd]
         
-        self.slider_kp = Slider(self.ax_kp, 'Kp', 0, 200, valinit=100)
-        self.slider_ki = Slider(self.ax_ki, 'Ki', 0, 5, valinit=0.5)
-        self.slider_kd = Slider(self.ax_kd, 'Kd', 0, 50, valinit=20)
+        self.slider_kp = Slider(self.ax_kp, 'Kp', 0, 100, valinit=35)
+        self.slider_ki = Slider(self.ax_ki, 'Ki', 0, 2, valinit=0.5)
+        self.slider_kd = Slider(self.ax_kd, 'Kd', 0, 30, valinit=12)
         
         self.slider_kp.on_changed(self._on_pid_change)
         self.slider_ki.on_changed(self._on_pid_change)
         self.slider_kd.on_changed(self._on_pid_change)
+        
+        # LQR sliders (Q diagonal and R)
+        self.lqr_axes = []
+        self.ax_q1 = self.fig.add_axes([0.25, 0.36, 0.25, 0.03])
+        self.ax_q2 = self.fig.add_axes([0.25, 0.31, 0.25, 0.03])
+        self.ax_q3 = self.fig.add_axes([0.25, 0.26, 0.25, 0.03])
+        self.ax_q4 = self.fig.add_axes([0.25, 0.21, 0.25, 0.03])
+        self.ax_r = self.fig.add_axes([0.55, 0.21, 0.12, 0.03])
+        self.lqr_axes = [self.ax_q1, self.ax_q2, self.ax_q3, self.ax_q4, self.ax_r]
+        
+        self.slider_q1 = Slider(self.ax_q1, 'Q[x]', 0.1, 20, valinit=8.0)
+        self.slider_q2 = Slider(self.ax_q2, 'Q[v]', 0.1, 10, valinit=3.0)
+        self.slider_q3 = Slider(self.ax_q3, 'Q[θ]', 1, 200, valinit=50)
+        self.slider_q4 = Slider(self.ax_q4, 'Q[ω]', 0.1, 20, valinit=5)
+        self.slider_r = Slider(self.ax_r, 'R', 0.1, 2.0, valinit=0.3)
+        
+        self.slider_q1.on_changed(self._on_lqr_change)
+        self.slider_q2.on_changed(self._on_lqr_change)
+        self.slider_q3.on_changed(self._on_lqr_change)
+        self.slider_q4.on_changed(self._on_lqr_change)
+        self.slider_r.on_changed(self._on_lqr_change)
+        
+        # Pole Placement sliders
+        self.pole_axes = []
+        self.ax_p1 = self.fig.add_axes([0.25, 0.34, 0.25, 0.03])
+        self.ax_p2 = self.fig.add_axes([0.25, 0.29, 0.25, 0.03])
+        self.ax_p3 = self.fig.add_axes([0.25, 0.24, 0.25, 0.03])
+        self.ax_p4 = self.fig.add_axes([0.25, 0.19, 0.25, 0.03])
+        self.pole_axes = [self.ax_p1, self.ax_p2, self.ax_p3, self.ax_p4]
+        
+        self.slider_p1 = Slider(self.ax_p1, 'p1', -6, -0.5, valinit=-2.0)
+        self.slider_p2 = Slider(self.ax_p2, 'p2', -6, -0.5, valinit=-2.5)
+        self.slider_p3 = Slider(self.ax_p3, 'p3', -6, -0.5, valinit=-3.0)
+        self.slider_p4 = Slider(self.ax_p4, 'p4', -6, -0.5, valinit=-3.5)
+        
+        self.slider_p1.on_changed(self._on_pole_change)
+        self.slider_p2.on_changed(self._on_pole_change)
+        self.slider_p3.on_changed(self._on_pole_change)
+        self.slider_p4.on_changed(self._on_pole_change)
+        
+        # Hide all controller sliders initially
+        self._hide_all_sliders()
         
         # Disturbance controls
         self.ax_dist_slider = self.fig.add_axes([0.25, 0.12, 0.25, 0.03])
@@ -167,7 +221,7 @@ class InteractiveSimulation:
         self.btn_apply_dist.on_clicked(self._on_apply_disturbance)
         
         # Reset button
-        self.ax_reset = self.fig.add_axes([0.55, 0.22, 0.12, 0.05])
+        self.ax_reset = self.fig.add_axes([0.55, 0.28, 0.12, 0.05])
         self.btn_reset = Button(self.ax_reset, 'Reset')
         self.btn_reset.on_clicked(self._on_reset)
         
@@ -186,15 +240,73 @@ class InteractiveSimulation:
         self.radio_motor = RadioButtons(self.ax_motor, ('On', 'Off'))
         self.radio_motor.on_clicked(self._on_motor_toggle)
     
+    def _hide_all_sliders(self):
+        """Hide all controller-specific sliders."""
+        for ax in self.pid_axes + self.lqr_axes + self.pole_axes:
+            ax.set_visible(False)
+    
+    def _show_pid_sliders(self):
+        """Show PID sliders only."""
+        self._hide_all_sliders()
+        for ax in self.pid_axes:
+            ax.set_visible(True)
+    
+    def _show_lqr_sliders(self):
+        """Show LQR sliders only."""
+        self._hide_all_sliders()
+        for ax in self.lqr_axes:
+            ax.set_visible(True)
+    
+    def _show_pole_sliders(self):
+        """Show Pole Placement sliders only."""
+        self._hide_all_sliders()
+        for ax in self.pole_axes:
+            ax.set_visible(True)
+    
     def _on_controller_change(self, label):
         self.active_controller = label
         self.pid.reset()
+        
+        # Show/hide appropriate sliders
+        if label == 'None':
+            self._hide_all_sliders()
+        elif label == 'PID':
+            self._show_pid_sliders()
+        elif label == 'LQR':
+            self._show_lqr_sliders()
+        elif label == 'Pole Placement':
+            self._show_pole_sliders()
+        
+        self.fig.canvas.draw_idle()
     
     def _on_pid_change(self, val):
         self.pid.kp = self.slider_kp.val
         self.pid.ki = self.slider_ki.val
         self.pid.kd = self.slider_kd.val
         self.pid.reset()
+    
+    def _on_lqr_change(self, val):
+        """Rebuild LQR controller with new Q and R values."""
+        Q = np.diag([self.slider_q1.val, self.slider_q2.val, 
+                     self.slider_q3.val, self.slider_q4.val])
+        R = np.array([[self.slider_r.val]])
+        self.lqr = LQRController(
+            cart_mass=self.cart_pole.M, pendulum_mass=self.cart_pole.m,
+            rod_length=self.cart_pole.L, cart_friction=self.cart_pole.b,
+            rotational_damping=self.cart_pole.c, gravity=self.cart_pole.g,
+            Q=Q, R=R
+        )
+    
+    def _on_pole_change(self, val):
+        """Rebuild Pole Placement controller with new poles."""
+        poles = np.array([self.slider_p1.val, self.slider_p2.val,
+                         self.slider_p3.val, self.slider_p4.val])
+        self.pole_placement = PolePlacementController(
+            cart_mass=self.cart_pole.M, pendulum_mass=self.cart_pole.m,
+            rod_length=self.cart_pole.L, cart_friction=self.cart_pole.b,
+            rotational_damping=self.cart_pole.c, gravity=self.cart_pole.g,
+            poles=poles
+        )
     
     def _on_apply_disturbance(self, event):
         self.disturbance = self.slider_disturbance.val
@@ -209,6 +321,7 @@ class InteractiveSimulation:
         self.t = 0.0
         self.time_history.clear()
         self.theta_history.clear()
+        self.position_history.clear()
         self.desired_force_history.clear()
         self.actual_force_history.clear()
         self.voltage_history.clear()
@@ -229,8 +342,6 @@ class InteractiveSimulation:
         if self.active_controller == 'None':
             return 0.0  # No control force
         controller = self._get_controller()
-        if self.active_controller == 'PID':
-            return controller.compute(filtered_state[2], filtered_state[3], t)
         return controller.compute(filtered_state, t)
     
     def _step(self):
@@ -267,6 +378,7 @@ class InteractiveSimulation:
         self.t += self.dt
         self.time_history.append(self.t)
         self.theta_history.append(np.rad2deg(self.state[2]))
+        self.position_history.append(self.state[0])
         self.desired_force_history.append(desired_force)
         self.actual_force_history.append(actual_force)
         self.voltage_history.append(voltage)
@@ -274,6 +386,7 @@ class InteractiveSimulation:
         if len(self.time_history) > self.max_history:
             self.time_history.pop(0)
             self.theta_history.pop(0)
+            self.position_history.pop(0)
             self.desired_force_history.pop(0)
             self.actual_force_history.pop(0)
             self.voltage_history.pop(0)
@@ -331,6 +444,9 @@ class InteractiveSimulation:
             self.theta_line.set_data(self.time_history, self.theta_history)
             self.ax_theta.set_xlim(t_min, self.t + 0.5)
             
+            self.position_line.set_data(self.time_history, self.position_history)
+            self.ax_position.set_xlim(t_min, self.t + 0.5)
+            
             self.desired_line.set_data(self.time_history, self.desired_force_history)
             self.actual_line.set_data(self.time_history, self.actual_force_history)
             self.ax_force.set_xlim(t_min, self.t + 0.5)
@@ -351,10 +467,14 @@ def main():
     print("=" * 50)
     print("Controls:")
     print("  - Select controller: None / PID / LQR / Pole Placement")
-    print("  - Adjust PID gains with sliders")
+    print("  - Controller-specific sliders appear when selected:")
+    print("      PID: Kp, Ki, Kd")
+    print("      LQR: Q matrix (diag), R")
+    print("      Pole Placement: 4 pole locations")
     print("  - Apply disturbance impulses")
     print("  - Toggle noise and motor model on/off")
     print()
+    print("Objective: Stabilize pendulum upright AND move cart to x=2m")
     print("Motor: 4x DC motors, 3-9V, 90 RPM at 4.5V, 30mm wheels")
     print("=" * 50)
     

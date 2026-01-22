@@ -59,8 +59,6 @@ def run_simulation(
         # Compute desired force from controller
         if controller is None:
             desired_force = 0.0
-        elif controller_name == 'PID':
-            desired_force = controller.compute(filtered_state[2], filtered_state[3], t)
         else:
             desired_force = controller.compute(filtered_state, t)
         
@@ -129,17 +127,20 @@ def generate_comparison_plots(
         tau_position=0.1, tau_angle=0.08, dt=0.02
     )
     
-    # Controllers
-    pid = PIDController(kp=100, ki=0.5, kd=20.0, setpoint=0.0)
+    # Controllers - Tuned for motor constraints (~6N max force)
+    pid = PIDController(kp=35.0, ki=0.5, kd=12.0, kp_pos=1.0, ki_pos=0.02, kd_pos=2.5, x_target=2.0, max_angle_setpoint=0.12)
     lqr = LQRController(
         cart_mass=cart_pole.M, pendulum_mass=cart_pole.m,
         rod_length=cart_pole.L, cart_friction=cart_pole.b,
-        rotational_damping=cart_pole.c, gravity=cart_pole.g
+        rotational_damping=cart_pole.c, gravity=cart_pole.g,
+        Q=np.diag([8.0, 3.0, 50.0, 5.0]),  # Increased x weight for faster response
+        R=np.array([[0.3]])  # Reduced R to allow more control effort
     )
     pole_placement = PolePlacementController(
         cart_mass=cart_pole.M, pendulum_mass=cart_pole.m,
         rod_length=cart_pole.L, cart_friction=cart_pole.b,
-        rotational_damping=cart_pole.c, gravity=cart_pole.g
+        rotational_damping=cart_pole.c, gravity=cart_pole.g,
+        poles=np.array([-2.0, -2.5, -3.0, -3.5])  # Slightly faster poles
     )
     
     controllers = [
@@ -196,6 +197,8 @@ def generate_comparison_plots(
         ax.set_ylabel(label)
         ax.grid(True, alpha=0.3)
         ax.legend(loc='best', fontsize=9)
+        if idx == 0:  # Position plot - show target
+            ax.axhline(2.0, color='k', linestyle='--', alpha=0.5, label='Target')
         if idx == 2:  # Angle plot
             ax.axhline(0, color='k', linestyle='--', alpha=0.3)
     
@@ -356,6 +359,27 @@ def generate_comparison_plots(
     if save_plots:
         fig5.savefig(plots_dir / 'comparison_metrics.png', dpi=150)
         print(f"Saved: {plots_dir / 'comparison_metrics.png'}")
+    
+    # Plot 6: Cart position comparison
+    fig6, ax6 = plt.subplots(figsize=(12, 6))
+    ax6.set_title('Cart Position: Controller Comparison', fontsize=14)
+    
+    for result in results:
+        ax6.plot(result.time, result.states[:, 0],
+                color=colors[result.name], label=result.name, linewidth=2)
+    
+    ax6.axhline(2.0, color='k', linestyle='--', alpha=0.5, label='Target (2m)')
+    ax6.axhline(0, color='k', linestyle=':', alpha=0.3)
+    ax6.set_xlabel('Time (s)', fontsize=12)
+    ax6.set_ylabel('Position (m)', fontsize=12)
+    ax6.grid(True, alpha=0.3)
+    ax6.legend(loc='best', fontsize=11)
+    ax6.set_xlim(0, duration)
+    
+    plt.tight_layout()
+    if save_plots:
+        fig6.savefig(plots_dir / 'comparison_position.png', dpi=150)
+        print(f"Saved: {plots_dir / 'comparison_position.png'}")
     
     print("-" * 50)
     print("All plots generated successfully!")
