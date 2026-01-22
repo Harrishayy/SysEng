@@ -26,7 +26,7 @@ class StateFilter:
     Stage 2: Dirty derivative ẏ[k] = (y[k] - y[k-1]) / Ts
     """
     
-    def __init__(self, tau_position: float = 0.05, tau_angle: float = 0.02, dt: float = 0.02):
+    def __init__(self, tau_position: float = 0.1, tau_angle: float = 0.08, dt: float = 0.02):
         self.tau_position = tau_position
         self.tau_angle = tau_angle
         self.dt = dt
@@ -87,8 +87,8 @@ class NoisyStateProcessor:
         self,
         position_noise_std: float = 0.005,
         angle_noise_std: float = 0.01,
-        tau_position: float = 0.05,
-        tau_angle: float = 0.02,
+        tau_position: float = 0.1,
+        tau_angle: float = 0.08,
         dt: float = 0.02,
         seed: int = None
     ):
