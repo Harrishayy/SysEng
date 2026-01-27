@@ -52,6 +52,8 @@ class InteractiveSimulation:
         self.active_controller = 'None'  # Start uncontrolled
         self.disturbance = 0.0
         self.disturbance_duration = 0
+        self.pendulum_disturbance = 0.0
+        self.pendulum_disturbance_duration = 0
         self.noise_enabled = True
         self.motor_enabled = True
         self.running = True
@@ -80,7 +82,7 @@ class InteractiveSimulation:
         self.fig.suptitle('Interactive Cart-Pole with Motor Model', fontsize=14)
         
         # Animation axes
-        self.ax_anim = self.fig.add_axes([0.05, 0.45, 0.55, 0.5])
+        self.ax_anim = self.fig.add_axes([0.06, 0.45, 0.55, 0.5])
         self.ax_anim.set_xlim(-3, 3)
         self.ax_anim.set_ylim(-0.5, 1.5)
         self.ax_anim.set_aspect('equal')
@@ -111,35 +113,38 @@ class InteractiveSimulation:
         self.dist_arrow = self.ax_anim.annotate('', xy=(0, 0), xytext=(0, 0),
                                                 arrowprops=dict(arrowstyle='->', color='red', lw=3))
         
-        # Real-time plots
-        self.ax_theta = self.fig.add_axes([0.65, 0.78, 0.32, 0.12])
+        # Real-time plots - adjusted positions for better spacing
+        self.ax_theta = self.fig.add_axes([0.68, 0.77, 0.30, 0.13])
         self.ax_theta.set_ylabel('Angle (deg)')
         self.ax_theta.set_xlim(0, 10)
         self.ax_theta.set_ylim(-30, 30)
         self.ax_theta.grid(True, alpha=0.3)
         self.ax_theta.axhline(0, color='k', linestyle='--', alpha=0.3)
+        self.ax_theta.tick_params(labelbottom=False)  # Hide x labels
         self.theta_line, = self.ax_theta.plot([], [], 'r-', linewidth=1.5)
         
-        self.ax_position = self.fig.add_axes([0.65, 0.63, 0.32, 0.12])
+        self.ax_position = self.fig.add_axes([0.68, 0.62, 0.30, 0.13])
         self.ax_position.set_ylabel('Position (m)')
         self.ax_position.set_xlim(0, 10)
         self.ax_position.set_ylim(-3, 3)
         self.ax_position.grid(True, alpha=0.3)
         self.ax_position.axhline(2.0, color='g', linestyle='--', alpha=0.5, label='Target')
         self.ax_position.axhline(0, color='k', linestyle='--', alpha=0.3)
+        self.ax_position.tick_params(labelbottom=False)  # Hide x labels
         self.position_line, = self.ax_position.plot([], [], 'b-', linewidth=1.5)
         
-        self.ax_force = self.fig.add_axes([0.65, 0.48, 0.32, 0.12])
+        self.ax_force = self.fig.add_axes([0.68, 0.47, 0.30, 0.13])
         self.ax_force.set_ylabel('Force (N)')
         self.ax_force.set_xlim(0, 10)
         self.ax_force.set_ylim(-50, 50)
         self.ax_force.grid(True, alpha=0.3)
         self.ax_force.axhline(0, color='k', linestyle='--', alpha=0.3)
+        self.ax_force.tick_params(labelbottom=False)  # Hide x labels
         self.desired_line, = self.ax_force.plot([], [], 'b--', linewidth=1, label='Desired', alpha=0.7)
         self.actual_line, = self.ax_force.plot([], [], 'g-', linewidth=1.5, label='Motor')
         self.ax_force.legend(loc='upper right', fontsize=8)
         
-        self.ax_voltage = self.fig.add_axes([0.65, 0.35, 0.32, 0.10])
+        self.ax_voltage = self.fig.add_axes([0.68, 0.32, 0.30, 0.13])
         self.ax_voltage.set_ylabel('Voltage (V)')
         self.ax_voltage.set_xlabel('Time (s)')
         self.ax_voltage.set_xlim(0, 10)
@@ -150,16 +155,16 @@ class InteractiveSimulation:
         self.voltage_line, = self.ax_voltage.plot([], [], 'm-', linewidth=1.5)
         
         # Controller selection
-        self.ax_radio = self.fig.add_axes([0.05, 0.22, 0.12, 0.18])
+        self.ax_radio = self.fig.add_axes([0.05, 0.15, 0.12, 0.18])
         self.ax_radio.set_title('Controller')
         self.radio_controller = RadioButtons(self.ax_radio, ('None', 'PID', 'LQR', 'Pole Placement'))
         self.radio_controller.on_clicked(self._on_controller_change)
         
         # PID sliders
         self.pid_axes = []
-        self.ax_kp = self.fig.add_axes([0.25, 0.32, 0.25, 0.03])
-        self.ax_ki = self.fig.add_axes([0.25, 0.27, 0.25, 0.03])
-        self.ax_kd = self.fig.add_axes([0.25, 0.22, 0.25, 0.03])
+        self.ax_kp = self.fig.add_axes([0.22, 0.28, 0.22, 0.025])
+        self.ax_ki = self.fig.add_axes([0.22, 0.24, 0.22, 0.025])
+        self.ax_kd = self.fig.add_axes([0.22, 0.20, 0.22, 0.025])
         self.pid_axes = [self.ax_kp, self.ax_ki, self.ax_kd]
         
         self.slider_kp = Slider(self.ax_kp, 'Kp', 0, 100, valinit=35)
@@ -172,11 +177,11 @@ class InteractiveSimulation:
         
         # LQR sliders (Q diagonal and R)
         self.lqr_axes = []
-        self.ax_q1 = self.fig.add_axes([0.25, 0.36, 0.25, 0.03])
-        self.ax_q2 = self.fig.add_axes([0.25, 0.31, 0.25, 0.03])
-        self.ax_q3 = self.fig.add_axes([0.25, 0.26, 0.25, 0.03])
-        self.ax_q4 = self.fig.add_axes([0.25, 0.21, 0.25, 0.03])
-        self.ax_r = self.fig.add_axes([0.55, 0.21, 0.12, 0.03])
+        self.ax_q1 = self.fig.add_axes([0.22, 0.28, 0.22, 0.025])
+        self.ax_q2 = self.fig.add_axes([0.22, 0.24, 0.22, 0.025])
+        self.ax_q3 = self.fig.add_axes([0.22, 0.20, 0.22, 0.025])
+        self.ax_q4 = self.fig.add_axes([0.22, 0.16, 0.22, 0.025])
+        self.ax_r = self.fig.add_axes([0.48, 0.28, 0.10, 0.025])
         self.lqr_axes = [self.ax_q1, self.ax_q2, self.ax_q3, self.ax_q4, self.ax_r]
         
         self.slider_q1 = Slider(self.ax_q1, 'Q[x]', 0.1, 20, valinit=8.0)
@@ -193,10 +198,10 @@ class InteractiveSimulation:
         
         # Pole Placement sliders
         self.pole_axes = []
-        self.ax_p1 = self.fig.add_axes([0.25, 0.34, 0.25, 0.03])
-        self.ax_p2 = self.fig.add_axes([0.25, 0.29, 0.25, 0.03])
-        self.ax_p3 = self.fig.add_axes([0.25, 0.24, 0.25, 0.03])
-        self.ax_p4 = self.fig.add_axes([0.25, 0.19, 0.25, 0.03])
+        self.ax_p1 = self.fig.add_axes([0.22, 0.28, 0.22, 0.025])
+        self.ax_p2 = self.fig.add_axes([0.22, 0.24, 0.22, 0.025])
+        self.ax_p3 = self.fig.add_axes([0.22, 0.20, 0.22, 0.025])
+        self.ax_p4 = self.fig.add_axes([0.22, 0.16, 0.22, 0.025])
         self.pole_axes = [self.ax_p1, self.ax_p2, self.ax_p3, self.ax_p4]
         
         self.slider_p1 = Slider(self.ax_p1, 'p1', -6, -0.5, valinit=-2.0)
@@ -212,31 +217,38 @@ class InteractiveSimulation:
         # Hide all controller sliders initially
         self._hide_all_sliders()
         
-        # Disturbance controls
-        self.ax_dist_slider = self.fig.add_axes([0.25, 0.12, 0.25, 0.03])
-        self.slider_disturbance = Slider(self.ax_dist_slider, 'Disturbance', -30, 30, valinit=0)
-        
-        self.ax_dist_btn = self.fig.add_axes([0.55, 0.11, 0.12, 0.05])
-        self.btn_apply_dist = Button(self.ax_dist_btn, 'Apply Impulse')
-        self.btn_apply_dist.on_clicked(self._on_apply_disturbance)
-        
         # Reset button
-        self.ax_reset = self.fig.add_axes([0.55, 0.28, 0.12, 0.05])
+        self.ax_reset = self.fig.add_axes([0.48, 0.20, 0.10, 0.04])
         self.btn_reset = Button(self.ax_reset, 'Reset')
         self.btn_reset.on_clicked(self._on_reset)
         
+        # Disturbance controls (separate section at bottom)
+        self.ax_pend_dist_slider = self.fig.add_axes([0.22, 0.10, 0.22, 0.025])
+        self.slider_pend_disturbance = Slider(self.ax_pend_dist_slider, 'Pend (N·m)', -2, 2, valinit=0)
+        
+        self.ax_pend_dist_btn = self.fig.add_axes([0.48, 0.095, 0.10, 0.04])
+        self.btn_apply_pend_dist = Button(self.ax_pend_dist_btn, 'Pend Impulse')
+        self.btn_apply_pend_dist.on_clicked(self._on_apply_pendulum_disturbance)
+        
+        self.ax_dist_slider = self.fig.add_axes([0.22, 0.06, 0.22, 0.025])
+        self.slider_disturbance = Slider(self.ax_dist_slider, 'Cart (N)', -30, 30, valinit=0)
+        
+        self.ax_dist_btn = self.fig.add_axes([0.48, 0.055, 0.10, 0.04])
+        self.btn_apply_dist = Button(self.ax_dist_btn, 'Cart Impulse')
+        self.btn_apply_dist.on_clicked(self._on_apply_disturbance)
+        
         # Initial angle slider
-        self.ax_init_angle = self.fig.add_axes([0.25, 0.05, 0.25, 0.03])
-        self.slider_init_angle = Slider(self.ax_init_angle, 'Init Angle (deg)', -45, 45, valinit=5.7)
+        self.ax_init_angle = self.fig.add_axes([0.22, 0.02, 0.22, 0.025])
+        self.slider_init_angle = Slider(self.ax_init_angle, 'Init θ (deg)', -45, 45, valinit=5.7)
         
         # Toggles
-        self.ax_noise = self.fig.add_axes([0.75, 0.05, 0.1, 0.1])
-        self.ax_noise.set_title('Noise')
+        self.ax_noise = self.fig.add_axes([0.65, 0.08, 0.10, 0.12])
+        self.ax_noise.set_title('Noise', fontsize=9)
         self.radio_noise = RadioButtons(self.ax_noise, ('On', 'Off'))
         self.radio_noise.on_clicked(self._on_noise_toggle)
         
-        self.ax_motor = self.fig.add_axes([0.87, 0.05, 0.1, 0.1])
-        self.ax_motor.set_title('Motor')
+        self.ax_motor = self.fig.add_axes([0.78, 0.08, 0.10, 0.12])
+        self.ax_motor.set_title('Motor', fontsize=9)
         self.radio_motor = RadioButtons(self.ax_motor, ('On', 'Off'))
         self.radio_motor.on_clicked(self._on_motor_toggle)
     
@@ -312,12 +324,18 @@ class InteractiveSimulation:
         self.disturbance = self.slider_disturbance.val
         self.disturbance_duration = 10  # 0.2 seconds
     
+    def _on_apply_pendulum_disturbance(self, event):
+        self.pendulum_disturbance = self.slider_pend_disturbance.val
+        self.pendulum_disturbance_duration = 10  # 0.2 seconds
+    
     def _on_reset(self, event):
         init_angle = np.deg2rad(self.slider_init_angle.val)
         self.state = np.array([0.0, 0.0, init_angle, 0.0])
         self.filtered_state = self.state.copy()
         self.state_processor.reset()
         self.pid.reset()
+        self.disturbance_duration = 0
+        self.pendulum_disturbance_duration = 0
         self.t = 0.0
         self.time_history.clear()
         self.theta_history.clear()
@@ -359,15 +377,20 @@ class InteractiveSimulation:
             actual_force = desired_force
             voltage = 0.0
         
-        # Disturbance
-        dist = self.disturbance if self.disturbance_duration > 0 else 0.0
+        # Cart disturbance
+        cart_dist = self.disturbance if self.disturbance_duration > 0 else 0.0
         if self.disturbance_duration > 0:
             self.disturbance_duration -= 1
         
-        total_force = actual_force + dist
+        # Pendulum disturbance (torque)
+        pend_dist = self.pendulum_disturbance if self.pendulum_disturbance_duration > 0 else 0.0
+        if self.pendulum_disturbance_duration > 0:
+            self.pendulum_disturbance_duration -= 1
         
-        # Integrate
-        state_dot = self.cart_pole.dynamics(self.t, self.state, total_force)
+        total_force = actual_force + cart_dist
+        
+        # Integrate (pass pendulum torque disturbance)
+        state_dot = self.cart_pole.dynamics(self.t, self.state, total_force, pend_dist)
         self.state = self.state + state_dot * self.dt
         
         if self.noise_enabled:
@@ -391,13 +414,13 @@ class InteractiveSimulation:
             self.actual_force_history.pop(0)
             self.voltage_history.pop(0)
         
-        return desired_force, actual_force, voltage, dist
+        return desired_force, actual_force, voltage, cart_dist, pend_dist
     
     def _update_animation(self, frame):
         if not self.running:
             return []
         
-        desired_force, actual_force, voltage, dist = self._step()
+        desired_force, actual_force, voltage, cart_dist, pend_dist = self._step()
         x, theta = self.state[0], self.state[2]
         
         # Update cart
@@ -417,13 +440,19 @@ class InteractiveSimulation:
         self.rod_line.set_data([pivot_x, pend_x], [pivot_y, pend_y])
         self.bob_patch.center = (pend_x, pend_y)
         
-        # Disturbance arrow
-        if abs(dist) > 0.1:
-            self.dist_arrow.xy = (x + dist * 0.02, cart_y + self.cart_height / 2)
+        # Cart disturbance arrow
+        if abs(cart_dist) > 0.1:
+            self.dist_arrow.xy = (x + cart_dist * 0.02, cart_y + self.cart_height / 2)
             self.dist_arrow.xytext = (x, cart_y + self.cart_height / 2)
         else:
             self.dist_arrow.xy = (0, -10)
             self.dist_arrow.xytext = (0, -10)
+        
+        # Pendulum disturbance visual feedback (change bob color)
+        if abs(pend_dist) > 0.01:
+            self.bob_patch.set_facecolor('orange')
+        else:
+            self.bob_patch.set_facecolor('crimson')
         
         # Info text
         ctrl_name = "Uncontrolled" if self.active_controller == 'None' else self.active_controller
@@ -433,8 +462,10 @@ class InteractiveSimulation:
             info += f"\nDesired: {desired_force:.1f}N\nMotor: {actual_force:.1f}N"
             if self.motor_enabled:
                 info += f"\nVoltage: {voltage:.1f}V"
-        if abs(dist) > 0.1:
-            info += f"\nDist: {dist:.1f}N"
+        if abs(cart_dist) > 0.1:
+            info += f"\nCart Dist: {cart_dist:.1f}N"
+        if abs(pend_dist) > 0.01:
+            info += f"\nPend Dist: {pend_dist:.2f}N·m"
         self.info_text.set_text(info)
         
         # Update plots

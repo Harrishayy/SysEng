@@ -32,8 +32,16 @@ class CartPole:
         self.THETA = 2
         self.THETA_DOT = 3
     
-    def dynamics(self, t: float, state: np.ndarray, force: float = 0.0) -> np.ndarray:
-        """Compute state derivatives. Returns [x_dot, x_ddot, theta_dot, theta_ddot]."""
+    def dynamics(self, t: float, state: np.ndarray, force: float = 0.0, pendulum_torque: float = 0.0) -> np.ndarray:
+        """
+        Compute state derivatives. Returns [x_dot, x_ddot, theta_dot, theta_ddot].
+        
+        Args:
+            t: Current time
+            state: Current state [x, x_dot, theta, theta_dot]
+            force: Force applied to cart (N)
+            pendulum_torque: Torque/impulse applied to pendulum mass (N*m)
+        """
         x, x_dot, theta, theta_dot = state
         
         # Mass matrix
@@ -42,10 +50,10 @@ class CartPole:
             [self.m * self.L * np.cos(theta), self.m * self.L**2]
         ])
         
-        # Force vector
+        # Force vector (pendulum_torque added to rotational equation)
         B = np.array([
             force - self.b * x_dot + self.m * self.L * theta_dot**2 * np.sin(theta),
-            -self.c * theta_dot + self.m * self.g * self.L * np.sin(theta)
+            -self.c * theta_dot + self.m * self.g * self.L * np.sin(theta) + pendulum_torque
         ])
         
         # Solve for accelerations
