@@ -118,8 +118,8 @@ def generate_comparison_plots(
     
     motor = MotorModel(
         num_motors=4, wheel_radius=0.03,
-        voltage_min=3.0, voltage_max=9.0,
-        rpm_at_nominal=90.0, voltage_nominal=4.5
+        voltage_min=1.0, voltage_max=12.0,
+        rpm_at_nominal=170.0, voltage_nominal=12.0
     )
     
     state_processor = NoisyStateProcessor(
@@ -127,21 +127,18 @@ def generate_comparison_plots(
         tau_position=0.1, tau_angle=0.08, dt=0.02
     )
     
-    # Controllers - Tuned for motor constraints (~6N max force)
-    pid = PIDController(kp=35.0, ki=0.5, kd=12.0, kp_pos=1.0, ki_pos=0.02, kd_pos=2.5, x_target=2.0, max_angle_setpoint=0.12)
+    # Controllers - Tuned for LP 12V motor constraints (~4.8N max force)
+    pid = PIDController(x_target=2.0)  # Uses optimized defaults
     lqr = LQRController(
         cart_mass=cart_pole.M, pendulum_mass=cart_pole.m,
         rod_length=cart_pole.L, cart_friction=cart_pole.b,
-        rotational_damping=cart_pole.c, gravity=cart_pole.g,
-        Q=np.diag([8.0, 3.0, 50.0, 5.0]),  # Increased x weight for faster response
-        R=np.array([[0.3]])  # Reduced R to allow more control effort
-    )
+        rotational_damping=cart_pole.c, gravity=cart_pole.g
+    )  # Uses optimized Q=[1,1,100,10], R=0.5 defaults
     pole_placement = PolePlacementController(
         cart_mass=cart_pole.M, pendulum_mass=cart_pole.m,
         rod_length=cart_pole.L, cart_friction=cart_pole.b,
-        rotational_damping=cart_pole.c, gravity=cart_pole.g,
-        poles=np.array([-2.0, -2.5, -3.0, -3.5])  # Slightly faster poles
-    )
+        rotational_damping=cart_pole.c, gravity=cart_pole.g
+    )  # Uses optimized poles=[-1.5,-1.7,-1.9,-2.1] defaults
     
     controllers = [
         (None, 'Uncontrolled'),
@@ -243,9 +240,9 @@ def generate_comparison_plots(
     ax_volt.set_xlabel('Time (s)')
     ax_volt.grid(True, alpha=0.3)
     ax_volt.legend(loc='best')
-    ax_volt.axhline(3.0, color='k', linestyle=':', alpha=0.5, label='V_min')
-    ax_volt.axhline(9.0, color='k', linestyle=':', alpha=0.5, label='V_max')
-    ax_volt.set_ylim(-0.5, 10)
+    ax_volt.axhline(1.0, color='k', linestyle=':', alpha=0.5, label='V_min')
+    ax_volt.axhline(12.0, color='k', linestyle=':', alpha=0.5, label='V_max')
+    ax_volt.set_ylim(-0.5, 14)
     
     plt.tight_layout()
     if save_plots:

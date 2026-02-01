@@ -67,24 +67,26 @@ All controllers have dual objectives:
 Cascaded control: position error → angle setpoint → force.
 - Outer loop: position PD generates desired tilt angle
 - Inner loop: angle PID stabilizes to that setpoint
-- Default gains: Kp=100, Ki=0.5, Kd=20, Kp_pos=0.3, Kd_pos=0.5
+- Default gains: Kp=78, Ki=1.5, Kd=32, Kp_pos=0.11, Ki_pos=0.003, Kd_pos=0.50
 
 ### LQR Controller
 Optimal full-state feedback minimizing J = ∫(x'Qx + u'Ru)dt.
-- Default: Q = diag([1, 1, 100, 10]), R = 0.1
+- Default: Q = diag([1, 1, 100, 10]), R = 0.5
 - Setpoint: [2, 0, 0, 0] (x=2m, stationary, upright)
 
 ### Pole Placement Controller
 Full-state feedback with directly specified closed-loop poles.
-- Default poles: [-2, -3, -4, -5]
+- Default poles: [-1.5, -1.7, -1.9, -2.1]
 - Setpoint: [2, 0, 0, 0] (x=2m, stationary, upright)
 
 ## DC Motor Model
 
-Realistic motor model for physical implementation:
-- **4 motors**, voltage range 3V-9V
-- **90 RPM at 4.5V** (after 1:48 gear reduction)
+Realistic motor model for physical implementation (LP 12V):
+- **4 motors**, voltage range 1V-12V
+- **170 RPM at 12V** (no-load speed)
+- **Stall torque: 3.7 kg·cm**, Stall current: 0.9A
 - **30mm wheel radius**
+- **Max force: ~4.8N**
 
 Converts controller force to motor voltage with:
 - Back-EMF at high speeds
