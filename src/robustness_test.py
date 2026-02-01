@@ -148,8 +148,8 @@ def run_robustness_tests():
     
     motor = MotorModel(
         num_motors=4, wheel_radius=0.03,
-        voltage_min=3.0, voltage_max=9.0,
-        rpm_at_nominal=90.0, voltage_nominal=4.5
+        voltage_min=1.0, voltage_max=12.0,
+        rpm_at_nominal=170.0, voltage_nominal=12.0
     )
     
     state_processor = NoisyStateProcessor(
@@ -157,22 +157,18 @@ def run_robustness_tests():
         tau_position=0.1, tau_angle=0.08, dt=0.02
     )
     
-    # Controllers (same as generate_plots.py)
-    pid = PIDController(kp=35.0, ki=0.5, kd=12.0, kp_pos=1.0, ki_pos=0.02, 
-                        kd_pos=2.5, x_target=2.0, max_angle_setpoint=0.12)
+    # Controllers with tuned parameters for LP 12V motor
+    pid = PIDController(x_target=2.0)  # Uses optimized defaults
     lqr = LQRController(
         cart_mass=cart_pole.M, pendulum_mass=cart_pole.m,
         rod_length=cart_pole.L, cart_friction=cart_pole.b,
-        rotational_damping=cart_pole.c, gravity=cart_pole.g,
-        Q=np.diag([8.0, 3.0, 50.0, 5.0]),
-        R=np.array([[0.3]])
-    )
+        rotational_damping=cart_pole.c, gravity=cart_pole.g
+    )  # Uses optimized Q and R defaults
     pole_placement = PolePlacementController(
         cart_mass=cart_pole.M, pendulum_mass=cart_pole.m,
         rod_length=cart_pole.L, cart_friction=cart_pole.b,
-        rotational_damping=cart_pole.c, gravity=cart_pole.g,
-        poles=np.array([-2.0, -2.5, -3.0, -3.5])
-    )
+        rotational_damping=cart_pole.c, gravity=cart_pole.g
+    )  # Uses optimized pole defaults
     
     controllers = [
         (pid, 'PID'),
