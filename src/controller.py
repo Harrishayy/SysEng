@@ -41,9 +41,9 @@ class PIDController:
         # Time step
         if self.previous_time is None:
             self.previous_time = t
-            dt = 0.01
+            dt = 0.02
         else:
-            dt = max(t - self.previous_time, 0.01)
+            dt = max(t - self.previous_time, 0.02)
         
         # Outer loop: position PID → desired angle
         pos_error = self.x_target - x
