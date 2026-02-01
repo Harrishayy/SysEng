@@ -20,11 +20,11 @@ class InteractiveSimulation:
             cart_friction=0.1, rotational_damping=0.01, gravity=9.81
         )
         
-        # Motor model
+        # Motor model (LP 12V motor specs)
         self.motor = MotorModel(
             num_motors=4, wheel_radius=0.03,
-            voltage_min=3.0, voltage_max=9.0,
-            rpm_at_nominal=90.0, voltage_nominal=4.5
+            voltage_min=1.0, voltage_max=12.0,
+            rpm_at_nominal=170.0, voltage_nominal=12.0
         )
         
         self.dt = 0.02  # 50 Hz
@@ -36,8 +36,8 @@ class InteractiveSimulation:
             tau_position=0.1, tau_angle=0.08, dt=self.dt, seed=None
         )
         
-        # Controllers (all target x=2m)
-        self.pid = PIDController(kp=35, ki=0.5, kd=12.0, x_target=2.0)
+        # Controllers (all target x=2m) - using optimized parameters for LP 12V motor
+        self.pid = PIDController(x_target=2.0)  # Uses optimized defaults
         self.lqr = LQRController(
             cart_mass=self.cart_pole.M, pendulum_mass=self.cart_pole.m,
             rod_length=self.cart_pole.L, cart_friction=self.cart_pole.b,
@@ -148,10 +148,10 @@ class InteractiveSimulation:
         self.ax_voltage.set_ylabel('Voltage (V)')
         self.ax_voltage.set_xlabel('Time (s)')
         self.ax_voltage.set_xlim(0, 10)
-        self.ax_voltage.set_ylim(0, 10)
+        self.ax_voltage.set_ylim(0, 14)
         self.ax_voltage.grid(True, alpha=0.3)
-        self.ax_voltage.axhline(3.0, color='r', linestyle=':', alpha=0.5)
-        self.ax_voltage.axhline(9.0, color='r', linestyle=':', alpha=0.5)
+        self.ax_voltage.axhline(1.0, color='r', linestyle=':', alpha=0.5)
+        self.ax_voltage.axhline(12.0, color='r', linestyle=':', alpha=0.5)
         self.voltage_line, = self.ax_voltage.plot([], [], 'm-', linewidth=1.5)
         
         # Controller selection
@@ -167,9 +167,9 @@ class InteractiveSimulation:
         self.ax_kd = self.fig.add_axes([0.22, 0.20, 0.22, 0.025])
         self.pid_axes = [self.ax_kp, self.ax_ki, self.ax_kd]
         
-        self.slider_kp = Slider(self.ax_kp, 'Kp', 0, 100, valinit=35)
-        self.slider_ki = Slider(self.ax_ki, 'Ki', 0, 2, valinit=0.5)
-        self.slider_kd = Slider(self.ax_kd, 'Kd', 0, 30, valinit=12)
+        self.slider_kp = Slider(self.ax_kp, 'Kp', 0, 100, valinit=55.0)
+        self.slider_ki = Slider(self.ax_ki, 'Ki', 0, 5, valinit=2.0)
+        self.slider_kd = Slider(self.ax_kd, 'Kd', 0, 40, valinit=26.0)
         
         self.slider_kp.on_changed(self._on_pid_change)
         self.slider_ki.on_changed(self._on_pid_change)
@@ -184,11 +184,11 @@ class InteractiveSimulation:
         self.ax_r = self.fig.add_axes([0.48, 0.28, 0.10, 0.025])
         self.lqr_axes = [self.ax_q1, self.ax_q2, self.ax_q3, self.ax_q4, self.ax_r]
         
-        self.slider_q1 = Slider(self.ax_q1, 'Q[x]', 0.1, 20, valinit=8.0)
-        self.slider_q2 = Slider(self.ax_q2, 'Q[v]', 0.1, 10, valinit=3.0)
-        self.slider_q3 = Slider(self.ax_q3, 'Q[θ]', 1, 200, valinit=50)
-        self.slider_q4 = Slider(self.ax_q4, 'Q[ω]', 0.1, 20, valinit=5)
-        self.slider_r = Slider(self.ax_r, 'R', 0.1, 2.0, valinit=0.3)
+        self.slider_q1 = Slider(self.ax_q1, 'Q[x]', 0.1, 20, valinit=1.0)
+        self.slider_q2 = Slider(self.ax_q2, 'Q[v]', 0.1, 10, valinit=1.0)
+        self.slider_q3 = Slider(self.ax_q3, 'Q[θ]', 1, 200, valinit=100.0)
+        self.slider_q4 = Slider(self.ax_q4, 'Q[ω]', 0.1, 30, valinit=10.0)
+        self.slider_r = Slider(self.ax_r, 'R', 0.1, 5.0, valinit=0.5)
         
         self.slider_q1.on_changed(self._on_lqr_change)
         self.slider_q2.on_changed(self._on_lqr_change)
@@ -204,10 +204,10 @@ class InteractiveSimulation:
         self.ax_p4 = self.fig.add_axes([0.22, 0.16, 0.22, 0.025])
         self.pole_axes = [self.ax_p1, self.ax_p2, self.ax_p3, self.ax_p4]
         
-        self.slider_p1 = Slider(self.ax_p1, 'p1', -6, -0.5, valinit=-2.0)
-        self.slider_p2 = Slider(self.ax_p2, 'p2', -6, -0.5, valinit=-2.5)
-        self.slider_p3 = Slider(self.ax_p3, 'p3', -6, -0.5, valinit=-3.0)
-        self.slider_p4 = Slider(self.ax_p4, 'p4', -6, -0.5, valinit=-3.5)
+        self.slider_p1 = Slider(self.ax_p1, 'p1', -5, -0.5, valinit=-1.5)
+        self.slider_p2 = Slider(self.ax_p2, 'p2', -5, -0.5, valinit=-1.7)
+        self.slider_p3 = Slider(self.ax_p3, 'p3', -5, -0.5, valinit=-1.9)
+        self.slider_p4 = Slider(self.ax_p4, 'p4', -5, -0.5, valinit=-2.1)
         
         self.slider_p1.on_changed(self._on_pole_change)
         self.slider_p2.on_changed(self._on_pole_change)

@@ -9,14 +9,14 @@ class PIDController:
     
     def __init__(
         self,
-        kp: float = 35.0,
-        ki: float = 0.5,
-        kd: float = 12.0,
-        kp_pos: float = 0.08,
-        ki_pos: float = 0.02,
-        kd_pos: float = 1.0,
+        kp: float = 55.0,
+        ki: float = 2.0,
+        kd: float = 26.0,
+        kp_pos: float = 0.05,
+        ki_pos: float = 0.004,
+        kd_pos: float = 0.11,
         x_target: float = 2.0,
-        max_angle_setpoint: float = 0.12
+        max_angle_setpoint: float = 0.09
     ):
         # Angle PID gains
         self.kp = kp
@@ -95,9 +95,9 @@ class LQRController:
         self.c = rotational_damping
         self.g = gravity
         
-        # Cost matrices (tuned for ~6N motor limit)
-        self.Q = Q if Q is not None else np.diag([8.0, 3.0, 50.0, 5.0])
-        self.R = R if R is not None else np.array([[0.3]])
+        # Cost matrices (tuned for LP 12V motor with ~4.8N max force)
+        self.Q = Q if Q is not None else np.diag([1.0, 1.0, 100.0, 10.0])
+        self.R = R if R is not None else np.array([[0.5]])
         self.setpoint = np.array(setpoint if setpoint is not None else [2.0, 0.0, 0.0, 0.0])
         
         # Compute gains
@@ -161,7 +161,7 @@ class PolePlacementController:
         self.c = rotational_damping
         self.g = gravity
         
-        self.desired_poles = np.array(poles if poles is not None else [-2.0, -2.5, -3.0, -3.5])
+        self.desired_poles = np.array(poles if poles is not None else [-1.5, -1.7, -1.9, -2.1])
         self.setpoint = np.array(setpoint if setpoint is not None else [2.0, 0.0, 0.0, 0.0])
         
         self.A, self.B = self._linearize_system()

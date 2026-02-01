@@ -6,9 +6,13 @@ class MotorModel:
     """
     DC Motor model converting desired force to actual motor output.
     
-    4 motors drive the cart wheels. Each motor:
-    - Voltage range: 3V-9V (below 3V = stall)
-    - Speed: 90 RPM at 4.5V (after 1:48 gear reduction)
+    4 motors drive the cart wheels. Each motor (LP 12V):
+    - Voltage: 12V nominal
+    - No-load speed @ 12V: 170 rpm
+    - No-load current @ 12V: 0.060 A
+    - Stall current @ 12V: 0.90 A
+    - Stall torque @ 12V: 3.7 kg·cm (0.363 Nm)
+    - Max output power @ 12V: 1.6 W
     - Wheel radius: 0.03m
     """
     
@@ -16,12 +20,12 @@ class MotorModel:
         self,
         num_motors: int = 4,
         wheel_radius: float = 0.03,
-        voltage_min: float = 3.0,
-        voltage_max: float = 9.0,
-        rpm_at_nominal: float = 90.0,
-        voltage_nominal: float = 4.5,
-        motor_resistance: float = 2.0,  # Ohms (typical for small DC motor)
-        torque_constant: float = 0.01   # Nm/A (estimated)
+        voltage_min: float = 1.0,
+        voltage_max: float = 12.0,
+        rpm_at_nominal: float = 170.0,
+        voltage_nominal: float = 12.0,
+        motor_resistance: float = 13.33,  # Ohms (12V / 0.9A stall current)
+        torque_constant: float = 0.0403   # Nm/A (0.363 Nm stall torque / 0.9A)
     ):
         self.num_motors = num_motors
         self.wheel_radius = wheel_radius
