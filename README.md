@@ -67,7 +67,7 @@ All controllers have dual objectives:
 Cascaded control: position error → angle setpoint → force.
 - Outer loop: position PD generates desired tilt angle
 - Inner loop: angle PID stabilizes to that setpoint
-- Default gains: Kp=78, Ki=1.5, Kd=32, Kp_pos=0.11, Ki_pos=0.003, Kd_pos=0.50
+- Default gains: Kp=55, Ki=2, Kd=26, Kp_pos=0.05, Ki_pos=0.004, Kd_pos=0.11
 
 ### LQR Controller
 Optimal full-state feedback minimizing J = ∫(x'Qx + u'Ru)dt.

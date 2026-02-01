@@ -9,14 +9,14 @@ class PIDController:
     
     def __init__(
         self,
-        kp: float = 78.0,
-        ki: float = 1.5,
-        kd: float = 32.0,
-        kp_pos: float = 0.11,
-        ki_pos: float = 0.003,
-        kd_pos: float = 0.50,
+        kp: float = 55.0,
+        ki: float = 2.0,
+        kd: float = 26.0,
+        kp_pos: float = 0.05,
+        ki_pos: float = 0.004,
+        kd_pos: float = 0.11,
         x_target: float = 2.0,
-        max_angle_setpoint: float = 0.10
+        max_angle_setpoint: float = 0.09
     ):
         # Angle PID gains
         self.kp = kp

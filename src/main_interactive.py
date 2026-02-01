@@ -167,9 +167,9 @@ class InteractiveSimulation:
         self.ax_kd = self.fig.add_axes([0.22, 0.20, 0.22, 0.025])
         self.pid_axes = [self.ax_kp, self.ax_ki, self.ax_kd]
         
-        self.slider_kp = Slider(self.ax_kp, 'Kp', 0, 100, valinit=78.0)
-        self.slider_ki = Slider(self.ax_ki, 'Ki', 0, 5, valinit=1.5)
-        self.slider_kd = Slider(self.ax_kd, 'Kd', 0, 50, valinit=32.0)
+        self.slider_kp = Slider(self.ax_kp, 'Kp', 0, 100, valinit=55.0)
+        self.slider_ki = Slider(self.ax_ki, 'Ki', 0, 5, valinit=2.0)
+        self.slider_kd = Slider(self.ax_kd, 'Kd', 0, 40, valinit=26.0)
         
         self.slider_kp.on_changed(self._on_pid_change)
         self.slider_ki.on_changed(self._on_pid_change)
