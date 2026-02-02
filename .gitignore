@@ -9,7 +9,5 @@ __pycache__/
 dist/
 build/
 .vscode/
-.cursorignore
-.cursorrules
-.cursorignore
 latex_section.md
+Sensors/
