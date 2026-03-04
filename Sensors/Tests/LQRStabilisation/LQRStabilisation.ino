@@ -5,8 +5,9 @@
 // LQR POLE STABILISATION CONTROLLER
 // ============================================================================
 // Stabilises an inverted pendulum at 0 degrees (upright position).
-// Uses direct motor command output (0-800 range).
-// No reliance on physical system parameters - pure gain tuning.
+// Uses linearized state-space model: x_dot = Ax + Bu
+// Control law: u = -K_lqr * x, where x = [x, x_dot, theta, theta_dot]^T
+// K_lqr gains are computed offline using solve_continuous_are (Python) or lqr (MATLAB)
 // ============================================================================
 
 // ---------- Motor configuration ----------
@@ -29,36 +30,66 @@ const int cartPinB = 26;
 volatile long cartEncoderCount = 0;
 
 // ============================================================================
-// CONTROLLER GAINS - TUNE THESE!
+// PHYSICAL SYSTEM PARAMETERS
 // ============================================================================
-// Control law: motorCmd = K_theta * theta_error + K_theta_dot * theta_dot
-//                       + K_x * x_error + K_x_dot * x_dot
-// 
-// Start by tuning K_theta and K_theta_dot to stabilise the pole.
-// Once stable, enable K_x to maintain position (currently set to 0).
+// These define the linearized state-space model around theta = 0 (upright):
+//   x_dot = A*x + B*u
+// where x = [x, x_dot, theta, theta_dot]^T and u is force applied to cart.
+//
+// A = [0,  1,       0,           0      ]
+//     [0,  0,      -m*g/M,       0      ]
+//     [0,  0,       0,           1      ]
+//     [0,  0,  g*(M+m)/(M*l),    0      ]
+//
+// B = [0, 1/M, 0, -1/(M*l)]^T
 // ============================================================================
 
-// Angle control gains (PRIMARY - tune these first!)
-float K_theta     = 150.0f;   // Proportional gain on angle error (motor_cmd per radian)
-float K_theta_dot = 15.0f;    // Derivative gain on angular velocity (damping)
+const float g = 9.81f;           // Gravitational acceleration (m/s^2)
+float M = 1.0f;                  // Mass of cart (kg) - PLACEHOLDER
+float m = 0.1f;                  // Mass of pendulum (kg) - PLACEHOLDER
+float l = 0.3f;                  // Distance from pivot to pendulum CoM (m) - PLACEHOLDER
 
-// Position control gains (SECONDARY - tune after pole is stable)
-float K_x         = 0.0f;     // Proportional gain on position error (SET TO 0 FOR NOW)
-float K_x_dot     = 0.0f;     // Derivative gain on cart velocity
+// ============================================================================
+// LQR GAIN VECTOR - COMPUTED OFFLINE
+// ============================================================================
+// Control law: u = -K_lqr * x = -[K1, K2, K3, K4] * [x, x_dot, theta, theta_dot]^T
+//
+// Compute K_lqr offline using:
+//   Python: scipy.linalg.solve_continuous_are() then K = R^-1 * B^T * P
+//   MATLAB: [K, ~, ~] = lqr(A, B, Q, R)
+//
+// Q and R matrices define the cost function J = integral(x'Qx + u'Ru)dt
+// Larger Q penalizes state deviations, larger R penalizes control effort.
+// ============================================================================
 
-// Integral gain for angle (helps with steady-state offset)
-float Ki_theta    = 5.0f;     // Integral gain on angle error
-const float INTEGRAL_LIMIT = 50.0f;  // Anti-windup limit
+// LQR gains: K_lqr = [K1, K2, K3, K4] corresponding to [x, x_dot, theta, theta_dot]
+float K_lqr[4] = {
+    0.0f,     // K1: gain on cart position (x)
+    0.0f,     // K2: gain on cart velocity (x_dot)
+    150.0f,   // K3: gain on pendulum angle (theta) - PLACEHOLDER
+    15.0f     // K4: gain on angular velocity (theta_dot) - PLACEHOLDER
+};
+
+// Scaling factor to convert force (N) to motor command (0-800)
+// motor_cmd = u * FORCE_TO_CMD_SCALE
+const float FORCE_TO_CMD_SCALE = 1.0f;  // PLACEHOLDER - calibrate for your motor
 
 // ---------- Setpoints ----------
 const float THETA_SETPOINT = 0.0f;   // Target angle: 0 = upright (radians)
-const float X_SETPOINT = 2.0f;       // Target position: 2 meters
+const float X_SETPOINT = 0.0f;       // Target position: 0 meters (origin)
 
 // ---------- Control loop timing ----------
 const float LOOP_DT_S = 0.002f;      // 2ms = 500 Hz control loop
 
 // ---------- State estimation (simple low-pass filter for derivatives) ----------
 const float VELOCITY_FILTER_ALPHA = 0.2f;  // Higher = more responsive, noisier
+
+// ---------- Moving average filter for encoder measurements ----------
+const int MA_FILTER_SIZE = 10;  // Number of samples for moving average
+float theta_ma_buffer[MA_FILTER_SIZE] = {0};  // Buffer for pendulum angle
+float x_ma_buffer[MA_FILTER_SIZE] = {0};      // Buffer for cart position
+int ma_buffer_index = 0;                       // Current index in circular buffer
+bool ma_buffer_filled = false;                 // True once buffer has been filled once
 
 // ---------- State variables ----------
 long zeroCount = 0;
@@ -74,8 +105,45 @@ float x_dot_filtered = 0.0f;
 float prev_theta = 0.0f;
 float prev_x = 0.0f;
 
-// Integral accumulator
-float integral_theta = 0.0f;
+// State vector: x = [x, x_dot, theta, theta_dot]^T
+float state[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+
+// ============================================================================
+// MOVING AVERAGE FILTER
+// ============================================================================
+// Circular buffer implementation for noise reduction on encoder readings.
+// Call updateMovingAverageBuffers() each control loop iteration.
+// ============================================================================
+
+float computeMovingAverage(float* buffer, int size, bool filled) {
+  float sum = 0.0f;
+  int count = filled ? size : ma_buffer_index;
+  if (count == 0) return 0.0f;
+  
+  for (int i = 0; i < count; i++) {
+    sum += buffer[i];
+  }
+  return sum / (float)count;
+}
+
+void updateMovingAverageBuffers(float theta_raw, float x_raw) {
+  theta_ma_buffer[ma_buffer_index] = theta_raw;
+  x_ma_buffer[ma_buffer_index] = x_raw;
+  
+  ma_buffer_index++;
+  if (ma_buffer_index >= MA_FILTER_SIZE) {
+    ma_buffer_index = 0;
+    ma_buffer_filled = true;
+  }
+}
+
+float getFilteredTheta() {
+  return computeMovingAverage(theta_ma_buffer, MA_FILTER_SIZE, ma_buffer_filled);
+}
+
+float getFilteredX() {
+  return computeMovingAverage(x_ma_buffer, MA_FILTER_SIZE, ma_buffer_filled);
+}
 
 // ============================================================================
 // UTILITY FUNCTIONS
@@ -112,7 +180,7 @@ float readPendulumAngleRad() {
   long relativeCount = countSnapshot - zeroCount;
   float angleDeg = (relativeCount * 360.0f) / ENCODER_CPR;
   angleDeg = wrapAngleDeg(angleDeg);
-  return angleDeg * DEG_TO_RAD;  // Return in radians
+  return angleDeg * DEG_TO_RAD;  // Return in radians (raw, unfiltered)
 }
 
 float readCartPosition() {
@@ -124,7 +192,16 @@ float readCartPosition() {
   long relativeCount = countSnapshot - cartZeroCount;
   float revolutions = (float)relativeCount / CART_ENCODER_CPR;
   float position = revolutions * 2.0f * PI * CART_WHEEL_RADIUS;
-  return position;
+  return position;  // Raw, unfiltered
+}
+
+void resetMovingAverageFilters() {
+  for (int i = 0; i < MA_FILTER_SIZE; i++) {
+    theta_ma_buffer[i] = 0.0f;
+    x_ma_buffer[i] = 0.0f;
+  }
+  ma_buffer_index = 0;
+  ma_buffer_filled = false;
 }
 
 void setAllMotors(int16_t speedCmd) {
@@ -170,29 +247,29 @@ void updateCartEncoderB() {
 // ============================================================================
 // LQR CONTROL COMPUTATION
 // ============================================================================
-// Outputs motor command directly (not force).
-// Control law: cmd = K_theta * theta_error + K_theta_dot * theta_dot
-//                  + K_x * x_error + K_x_dot * x_dot
-//                  + Ki_theta * integral(theta_error)
+// Implements optimal state feedback control: u = -K_lqr * (x - x_setpoint)
+// where x = [x, x_dot, theta, theta_dot]^T is the state vector.
+// The force u is then scaled to a motor command.
 // ============================================================================
 
-int16_t computeControl(float x, float x_dot, float theta, float theta_dot, float dt) {
-  // Compute errors
-  float error_theta = theta - THETA_SETPOINT;
-  float error_x = x - X_SETPOINT;
+int16_t computeControl(float x_pos, float x_dot, float theta, float theta_dot) {
+  // Form the state error vector (deviation from setpoint)
+  float state_error[4] = {
+    x_pos - X_SETPOINT,     // Position error
+    x_dot,                   // Velocity (setpoint is 0)
+    theta - THETA_SETPOINT,  // Angle error
+    theta_dot                // Angular velocity (setpoint is 0)
+  };
   
-  // Update integral term with anti-windup
-  integral_theta += error_theta * dt;
-  if (integral_theta > INTEGRAL_LIMIT) integral_theta = INTEGRAL_LIMIT;
-  if (integral_theta < -INTEGRAL_LIMIT) integral_theta = -INTEGRAL_LIMIT;
+  // Compute control input: u = -K_lqr * state_error
+  // u = -(K1*x_err + K2*x_dot + K3*theta_err + K4*theta_dot)
+  float u = 0.0f;
+  for (int i = 0; i < 4; i++) {
+    u -= K_lqr[i] * state_error[i];
+  }
   
-  // Compute control output (direct motor command)
-  // Positive command should move cart in direction to correct positive angle error
-  float cmd_f = K_theta * error_theta 
-              + K_theta_dot * theta_dot
-              + K_x * error_x 
-              + K_x_dot * x_dot
-              + Ki_theta * integral_theta;
+  // Scale force to motor command
+  float cmd_f = u * FORCE_TO_CMD_SCALE;
   
   // Convert to integer and apply limits/deadband
   int16_t cmd = (int16_t)cmd_f;
@@ -202,11 +279,6 @@ int16_t computeControl(float x, float x_dot, float theta, float theta_dot, float
     cmd = clampMotorCmd(cmd);
   } else {
     cmd = 0;  // Too small to matter, avoid chattering
-  }
-  
-  // Anti-windup: reduce integral if saturated
-  if (abs(cmd) >= MOTOR_MAX) {
-    integral_theta -= error_theta * dt * 0.5f;
   }
   
   return cmd;
@@ -264,26 +336,36 @@ void setup() {
   
   lastControlMicros = micros();
   
-  Serial.println("====================================");
+  Serial.println("============================================");
   Serial.println("LQR Pole Stabilisation Controller");
-  Serial.println("====================================");
-  Serial.println("Target: theta=0 deg (upright), x=2m");
+  Serial.println("============================================");
+  Serial.println("State-space model: x_dot = Ax + Bu");
+  Serial.println("Control law: u = -K_lqr * x");
+  Serial.println("State vector: x = [x, x_dot, theta, theta_dot]^T");
   Serial.println("");
-  Serial.println("Current gains:");
-  Serial.print("  K_theta     = "); Serial.println(K_theta);
-  Serial.print("  K_theta_dot = "); Serial.println(K_theta_dot);
-  Serial.print("  Ki_theta    = "); Serial.println(Ki_theta);
-  Serial.print("  K_x         = "); Serial.println(K_x);
-  Serial.print("  K_x_dot     = "); Serial.println(K_x_dot);
+  Serial.println("Physical parameters (PLACEHOLDERS):");
+  Serial.print("  M (cart mass)      = "); Serial.print(M); Serial.println(" kg");
+  Serial.print("  m (pendulum mass)  = "); Serial.print(m); Serial.println(" kg");
+  Serial.print("  l (pendulum length)= "); Serial.print(l); Serial.println(" m");
+  Serial.print("  g (gravity)        = "); Serial.print(g); Serial.println(" m/s^2");
+  Serial.println("");
+  Serial.println("LQR gains K_lqr = [K1, K2, K3, K4]:");
+  Serial.print("  K1 (x)         = "); Serial.println(K_lqr[0]);
+  Serial.print("  K2 (x_dot)     = "); Serial.println(K_lqr[1]);
+  Serial.print("  K3 (theta)     = "); Serial.println(K_lqr[2]);
+  Serial.print("  K4 (theta_dot) = "); Serial.println(K_lqr[3]);
+  Serial.println("");
+  Serial.println("Setpoints:");
+  Serial.print("  x_setpoint     = "); Serial.print(X_SETPOINT); Serial.println(" m");
+  Serial.print("  theta_setpoint = "); Serial.print(THETA_SETPOINT); Serial.println(" rad");
   Serial.println("");
   Serial.println("Commands:");
   Serial.println("  'r' = recalibrate (set current as zero)");
-  Serial.println("  'i' = reset integral term");
-  Serial.println("  '+' = increase K_theta by 10");
-  Serial.println("  '-' = decrease K_theta by 10");
-  Serial.println("  'd' = increase K_theta_dot by 1");
-  Serial.println("  's' = decrease K_theta_dot by 1");
-  Serial.println("====================================");
+  Serial.println("  '1/2' = increase/decrease K1 (x) by 1");
+  Serial.println("  '3/4' = increase/decrease K2 (x_dot) by 1");
+  Serial.println("  '+/-' = increase/decrease K3 (theta) by 10");
+  Serial.println("  'd/s' = increase/decrease K4 (theta_dot) by 1");
+  Serial.println("============================================");
 }
 
 // ============================================================================
@@ -299,37 +381,64 @@ void handleSerialCommands() {
         zeroCount = encoderCount;
         cartZeroCount = cartEncoderCount;
         interrupts();
-        integral_theta = 0.0f;
         theta_dot_filtered = 0.0f;
         x_dot_filtered = 0.0f;
-        Serial.println(">> Recalibrated. Integral reset.");
+        for (int i = 0; i < 4; i++) state[i] = 0.0f;
+        resetMovingAverageFilters();
+        prev_theta = 0.0f;
+        prev_x = 0.0f;
+        Serial.println(">> Recalibrated. State and filters reset.");
         break;
         
-      case 'i':  // Reset integral
-        integral_theta = 0.0f;
-        Serial.println(">> Integral reset.");
+      case '1':  // Increase K1 (x)
+        K_lqr[0] += 1.0f;
+        Serial.print(">> K1 (x) = "); Serial.println(K_lqr[0]);
         break;
         
-      case '+':  // Increase K_theta
-        K_theta += 10.0f;
-        Serial.print(">> K_theta = "); Serial.println(K_theta);
+      case '2':  // Decrease K1 (x)
+        K_lqr[0] -= 1.0f;
+        Serial.print(">> K1 (x) = "); Serial.println(K_lqr[0]);
         break;
         
-      case '-':  // Decrease K_theta
-        K_theta -= 10.0f;
-        if (K_theta < 0) K_theta = 0;
-        Serial.print(">> K_theta = "); Serial.println(K_theta);
+      case '3':  // Increase K2 (x_dot)
+        K_lqr[1] += 1.0f;
+        Serial.print(">> K2 (x_dot) = "); Serial.println(K_lqr[1]);
         break;
         
-      case 'd':  // Increase K_theta_dot
-        K_theta_dot += 1.0f;
-        Serial.print(">> K_theta_dot = "); Serial.println(K_theta_dot);
+      case '4':  // Decrease K2 (x_dot)
+        K_lqr[1] -= 1.0f;
+        Serial.print(">> K2 (x_dot) = "); Serial.println(K_lqr[1]);
         break;
         
-      case 's':  // Decrease K_theta_dot
-        K_theta_dot -= 1.0f;
-        if (K_theta_dot < 0) K_theta_dot = 0;
-        Serial.print(">> K_theta_dot = "); Serial.println(K_theta_dot);
+      case '+':  // Increase K3 (theta)
+        K_lqr[2] += 10.0f;
+        Serial.print(">> K3 (theta) = "); Serial.println(K_lqr[2]);
+        break;
+        
+      case '-':  // Decrease K3 (theta)
+        K_lqr[2] -= 10.0f;
+        if (K_lqr[2] < 0) K_lqr[2] = 0;
+        Serial.print(">> K3 (theta) = "); Serial.println(K_lqr[2]);
+        break;
+        
+      case 'd':  // Increase K4 (theta_dot)
+        K_lqr[3] += 1.0f;
+        Serial.print(">> K4 (theta_dot) = "); Serial.println(K_lqr[3]);
+        break;
+        
+      case 's':  // Decrease K4 (theta_dot)
+        K_lqr[3] -= 1.0f;
+        if (K_lqr[3] < 0) K_lqr[3] = 0;
+        Serial.print(">> K4 (theta_dot) = "); Serial.println(K_lqr[3]);
+        break;
+        
+      case 'p':  // Print current state and gains
+        Serial.println("\n--- Current LQR Gains ---");
+        Serial.print("K_lqr = ["); 
+        Serial.print(K_lqr[0]); Serial.print(", ");
+        Serial.print(K_lqr[1]); Serial.print(", ");
+        Serial.print(K_lqr[2]); Serial.print(", ");
+        Serial.print(K_lqr[3]); Serial.println("]");
         break;
     }
   }
@@ -352,24 +461,35 @@ void loop() {
   // Read sensors
   float theta_raw = readPendulumAngleRad();
   float x_raw = readCartPosition();
+  
+  // Update moving average buffers and get filtered values
+  updateMovingAverageBuffers(theta_raw, x_raw);
+  float theta_ma = getFilteredTheta();
+  float x_ma = getFilteredX();
 
   // Simple low-pass filter derivative estimation
   // theta_dot ≈ (theta - prev_theta) / dt, then filtered
-  float theta_dot_raw = (theta_raw - prev_theta) / LOOP_DT_S;
-  float x_dot_raw = (x_raw - prev_x) / LOOP_DT_S;
+  float theta_dot_raw = (theta_ma - prev_theta) / LOOP_DT_S;
+  float x_dot_raw = (x_ma - prev_x) / LOOP_DT_S;
   
-  // Update filtered estimates (exponential moving average)
-  theta_filtered = theta_raw;  // Angle doesn't need much filtering
+  // Update filtered estimates (exponential moving average for velocities)
+  theta_filtered = theta_ma;  // Use MA-filtered angle
   theta_dot_filtered = VELOCITY_FILTER_ALPHA * theta_dot_raw + (1.0f - VELOCITY_FILTER_ALPHA) * theta_dot_filtered;
-  x_filtered = x_raw;
+  x_filtered = x_ma;          // Use MA-filtered position
   x_dot_filtered = VELOCITY_FILTER_ALPHA * x_dot_raw + (1.0f - VELOCITY_FILTER_ALPHA) * x_dot_filtered;
   
-  // Store for next iteration
-  prev_theta = theta_raw;
-  prev_x = x_raw;
+  // Store for next iteration (use MA-filtered values for derivative calculation)
+  prev_theta = theta_ma;
+  prev_x = x_ma;
+  
+  // Update state vector: x = [x, x_dot, theta, theta_dot]^T
+  state[0] = x_filtered;
+  state[1] = x_dot_filtered;
+  state[2] = theta_filtered;
+  state[3] = theta_dot_filtered;
 
-  // Compute control
-  int16_t motorCmd = computeControl(x_filtered, x_dot_filtered, theta_filtered, theta_dot_filtered, LOOP_DT_S);
+  // Compute LQR control: u = -K_lqr * x
+  int16_t motorCmd = computeControl(x_filtered, x_dot_filtered, theta_filtered, theta_dot_filtered);
   
   // Apply to motors
   setAllMotors(motorCmd);
@@ -377,13 +497,15 @@ void loop() {
   // Print debug info at 10 Hz
   if (millis() - lastPrintMillis >= 100) {
     lastPrintMillis = millis();
-    Serial.print("theta:");
-    Serial.print(theta_filtered * RAD_TO_DEG, 1);
-    Serial.print("°  theta_dot:");
-    Serial.print(theta_dot_filtered, 1);
-    Serial.print("  x:");
-    Serial.print(x_filtered, 3);
-    Serial.print("m  cmd:");
+    Serial.print("x:");
+    Serial.print(state[0], 3);
+    Serial.print("m  x_dot:");
+    Serial.print(state[1], 2);
+    Serial.print("  theta:");
+    Serial.print(state[2] * RAD_TO_DEG, 1);
+    Serial.print("deg  theta_dot:");
+    Serial.print(state[3], 1);
+    Serial.print("  u:");
     Serial.println(motorCmd);
   }
 }
