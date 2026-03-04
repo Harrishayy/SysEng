@@ -9,22 +9,20 @@
  */
 
 #include <Motoron.h>
-
-// Arduino Giga uses Wire1 (change to Wire for Uno/Mega)
-#define I2C_BUS Wire1
+#include <Wire.h>
 
 MotoronI2C shield1(16);
 MotoronI2C shield2(17);
 
-const int16_t SPEED = 400;  // Motor speed (0-800)
+const int16_t SPEED = 800;  // Motor speed (0-800)
 
 void setup() {
-  Serial.begin(115200);
-  I2C_BUS.begin();
+  Serial.begin(9600);
+  Wire1.begin();
   
-  // Configure shields
-  shield1.setBus(&I2C_BUS);
-  shield2.setBus(&I2C_BUS);
+  // Configure shields to use Wire1 (SCL1/SDA1)
+  shield1.setBus(&Wire1);
+  shield2.setBus(&Wire1);
   
   // Initialize shield 1
   shield1.reinitialize();
@@ -46,34 +44,9 @@ void setup() {
 }
 
 void loop() {
-  if (Serial.available()) {
-    char cmd = Serial.read();
-    
-    if (cmd == 'f' || cmd == 'F') {
-      // All motors forward
-      shield1.setSpeed(1, SPEED);
-      shield1.setSpeed(2, SPEED);
-      shield2.setSpeed(1, SPEED);
-      shield2.setSpeed(2, SPEED);
-      Serial.println("Forward");
-    }
-    else if (cmd == 'b' || cmd == 'B') {
-      // All motors backward
-      shield1.setSpeed(1, -SPEED);
-      shield1.setSpeed(2, -SPEED);
-      shield2.setSpeed(1, -SPEED);
-      shield2.setSpeed(2, -SPEED);
-      Serial.println("Backward");
-    }
-    else if (cmd == 's' || cmd == 'S') {
-      // Stop all motors
-      shield1.setSpeed(1, 0);
-      shield1.setSpeed(2, 0);
-      shield2.setSpeed(1, 0);
-      shield2.setSpeed(2, 0);
-      Serial.println("Stop");
-    }
-  }
-  
+  shield1.setSpeed(1, SPEED);
+  shield1.setSpeed(2, SPEED);
+  shield2.setSpeed(1, SPEED);
+  shield2.setSpeed(2, SPEED);
   delay(10);
 }
