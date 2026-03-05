@@ -14,7 +14,7 @@
 MotoronI2C shield1(16);
 MotoronI2C shield2(17);
 const int16_t MOTOR_MAX = 800;       // Maximum motor command (very fast)
-const int16_t MOTOR_DEADBAND = 50;   // Minimum command to overcome friction
+const int16_t MOTOR_DEADBAND = 0;    // Disabled - deadband causes jitter
 
 // ---------- Pendulum angle encoder (optical sensor) ----------
 const float ENCODER_CPR = 1000.0f;   // Counts per revolution
@@ -45,9 +45,9 @@ volatile long cartEncoderCount = 0;
 // ============================================================================
 
 const float g = 9.81f;           // Gravitational acceleration (m/s^2)
-float M = 1.0f;                  // Mass of cart (kg) - PLACEHOLDER
-float m = 0.1f;                  // Mass of pendulum (kg) - PLACEHOLDER
-float l = 0.3f;                  // Distance from pivot to pendulum CoM (m) - PLACEHOLDER
+float M = 1.2f;                  // Mass of cart (kg)
+float m = 0.91f;                  // Mass of pendulum (kg)
+float l = 0.6f;                  // Distance from pivot to pendulum CoM (m)
 
 // ============================================================================
 // LQR GAIN VECTOR - COMPUTED OFFLINE
@@ -63,16 +63,18 @@ float l = 0.3f;                  // Distance from pivot to pendulum CoM (m) - PL
 // ============================================================================
 
 // LQR gains: K_lqr = [K1, K2, K3, K4] corresponding to [x, x_dot, theta, theta_dot]
+// Computed using Q = diag([10, 1, 100, 10]), R = 1
 float K_lqr[4] = {
-    0.0f,     // K1: gain on cart position (x)
-    0.0f,     // K2: gain on cart velocity (x_dot)
-    150.0f,   // K3: gain on pendulum angle (theta) - PLACEHOLDER
-    15.0f     // K4: gain on angular velocity (theta_dot) - PLACEHOLDER
+    -3.1623f,    // K1: gain on cart position (x)
+    -5.2160f,    // K2: gain on cart velocity (x_dot)
+    -30.3482f,   // K3: gain on pendulum angle (theta)
+    -12.9260f    // K4: gain on angular velocity (theta_dot)
 };
 
 // Scaling factor to convert force (N) to motor command (0-800)
-// motor_cmd = u * FORCE_TO_CMD_SCALE
-const float FORCE_TO_CMD_SCALE = 1.0f;  // PLACEHOLDER - calibrate for your motor
+// Based on Pololu 4862: 4 motors, 0.167 N*m stall torque, 0.04m wheel radius
+// Max safe force = 50% of stall = 8.35 N
+const float FORCE_TO_CMD_SCALE = 95.81f;
 
 // ---------- Setpoints ----------
 const float THETA_SETPOINT = 0.0f;   // Target angle: 0 = upright (radians)
@@ -82,10 +84,10 @@ const float X_SETPOINT = 0.0f;       // Target position: 0 meters (origin)
 const float LOOP_DT_S = 0.002f;      // 2ms = 500 Hz control loop
 
 // ---------- State estimation (simple low-pass filter for derivatives) ----------
-const float VELOCITY_FILTER_ALPHA = 0.2f;  // Higher = more responsive, noisier
+const float VELOCITY_FILTER_ALPHA = 0.1f;  // Lower = smoother velocity, less jitter
 
 // ---------- Moving average filter for encoder measurements ----------
-const int MA_FILTER_SIZE = 10;  // Number of samples for moving average
+const int MA_FILTER_SIZE = 3;  // Reduced from 10 to minimize lag (was adding 20ms delay!)
 float theta_ma_buffer[MA_FILTER_SIZE] = {0};  // Buffer for pendulum angle
 float x_ma_buffer[MA_FILTER_SIZE] = {0};      // Buffer for cart position
 int ma_buffer_index = 0;                       // Current index in circular buffer
