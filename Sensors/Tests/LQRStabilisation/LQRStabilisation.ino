@@ -14,7 +14,7 @@
 MotoronI2C shield1(16);
 MotoronI2C shield2(17);
 const int16_t MOTOR_MAX = 800;       // Maximum motor command (very fast)
-const int16_t MOTOR_DEADBAND = 0;    // Disabled - deadband causes jitter
+const int16_t MOTOR_DEADBAND = 0;    // Disabled - was causing jitter
 
 // ---------- Pendulum angle encoder (optical sensor) ----------
 const float ENCODER_CPR = 1000.0f;   // Counts per revolution
@@ -47,7 +47,7 @@ volatile long cartEncoderCount = 0;
 const float g = 9.81f;           // Gravitational acceleration (m/s^2)
 float M = 1.2f;                  // Mass of cart (kg)
 float m = 0.91f;                  // Mass of pendulum (kg)
-float l = 0.6f;                  // Distance from pivot to pendulum CoM (m)
+float l = 0.5f;                  // Distance from pivot to pendulum CoM (m)
 
 // ============================================================================
 // LQR GAIN VECTOR - COMPUTED OFFLINE
@@ -64,11 +64,14 @@ float l = 0.6f;                  // Distance from pivot to pendulum CoM (m)
 
 // LQR gains: K_lqr = [K1, K2, K3, K4] corresponding to [x, x_dot, theta, theta_dot]
 // Computed using Q = diag([10, 1, 100, 10]), R = 1
+// Note: Control law is u = -K*x, so positive K opposes positive state error
+// K4 MUST be non-zero for damping - zero K4 causes oscillation!
+// START WITH K1=K2=0: Balance first, then add position control!
 float K_lqr[4] = {
-    -3.1623f,    // K1: gain on cart position (x)
-    -5.2160f,    // K2: gain on cart velocity (x_dot)
-    -30.3482f,   // K3: gain on pendulum angle (theta)
-    -12.9260f    // K4: gain on angular velocity (theta_dot)
+    -0.0f,        // K1: gain on cart position - DISABLED until balancing works
+    0.0f,        // K2: gain on cart velocity - DISABLED until balancing works
+    -126.0f,      // K3: gain on pendulum angle (theta)
+    -8.0f        // K4: gain on angular velocity (theta_dot) - CRITICAL for stability!
 };
 
 // Scaling factor to convert force (N) to motor command (0-800)
@@ -81,13 +84,13 @@ const float THETA_SETPOINT = 0.0f;   // Target angle: 0 = upright (radians)
 const float X_SETPOINT = 0.0f;       // Target position: 0 meters (origin)
 
 // ---------- Control loop timing ----------
-const float LOOP_DT_S = 0.002f;      // 2ms = 500 Hz control loop
+const float LOOP_DT_S = 0.001f;      // 1ms = 1000 Hz control loop
 
 // ---------- State estimation (simple low-pass filter for derivatives) ----------
-const float VELOCITY_FILTER_ALPHA = 0.1f;  // Lower = smoother velocity, less jitter
+const float VELOCITY_FILTER_ALPHA = 0.05f;  // Reduced from 0.2 - heavy smoothing to reduce jitter
 
 // ---------- Moving average filter for encoder measurements ----------
-const int MA_FILTER_SIZE = 3;  // Reduced from 10 to minimize lag (was adding 20ms delay!)
+const int MA_FILTER_SIZE = 3;   // Reduced from 10 to minimize lag (6ms vs 20ms)
 float theta_ma_buffer[MA_FILTER_SIZE] = {0};  // Buffer for pendulum angle
 float x_ma_buffer[MA_FILTER_SIZE] = {0};      // Buffer for cart position
 int ma_buffer_index = 0;                       // Current index in circular buffer
@@ -158,16 +161,9 @@ static inline float wrapAngleDeg(float angleDeg) {
   return angleDeg;
 }
 
-// Clamp motor command to valid range with deadband compensation
+// Clamp motor command to valid range
 static inline int16_t clampMotorCmd(int16_t cmd) {
-  // Apply deadband compensation (overcome static friction)
-  if (cmd > 0 && cmd < MOTOR_DEADBAND) {
-    cmd = MOTOR_DEADBAND;
-  } else if (cmd < 0 && cmd > -MOTOR_DEADBAND) {
-    cmd = -MOTOR_DEADBAND;
-  }
-  
-  // Clamp to motor limits
+  // Clamp to motor limits (deadband disabled - was causing jitter)
   if (cmd > MOTOR_MAX) return MOTOR_MAX;
   if (cmd < -MOTOR_MAX) return -MOTOR_MAX;
   return cmd;
@@ -276,12 +272,8 @@ int16_t computeControl(float x_pos, float x_dot, float theta, float theta_dot) {
   // Convert to integer and apply limits/deadband
   int16_t cmd = (int16_t)cmd_f;
   
-  // Only apply deadband compensation if command is meaningful
-  if (abs(cmd) > 5) {
-    cmd = clampMotorCmd(cmd);
-  } else {
-    cmd = 0;  // Too small to matter, avoid chattering
-  }
+  // Apply limits
+  cmd = clampMotorCmd(cmd);
   
   return cmd;
 }
@@ -297,17 +289,17 @@ void setupMotors() {
 
   shield1.reinitialize();
   shield1.clearResetFlag();
-  shield1.setMaxAcceleration(1, 0);  // No accel limit - immediate response
-  shield1.setMaxDeceleration(1, 0);
-  shield1.setMaxAcceleration(2, 0);
-  shield1.setMaxDeceleration(2, 0);
+  shield1.setMaxAcceleration(1, 400);  // No accel limit - immediate response
+  shield1.setMaxDeceleration(1, 400);
+  shield1.setMaxAcceleration(2, 400);
+  shield1.setMaxDeceleration(2, 400);
 
   shield2.reinitialize();
   shield2.clearResetFlag();
-  shield2.setMaxAcceleration(1, 0);
-  shield2.setMaxDeceleration(1, 0);
-  shield2.setMaxAcceleration(2, 0);
-  shield2.setMaxDeceleration(2, 0);
+  shield2.setMaxAcceleration(1, 400);
+  shield2.setMaxDeceleration(1, 400);
+  shield2.setMaxAcceleration(2, 400);
+  shield2.setMaxDeceleration(2, 400);
 }
 
 void setupEncoders() {
