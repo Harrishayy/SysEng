@@ -68,10 +68,10 @@ float l = 0.5f;                  // Distance from pivot to pendulum CoM (m)
 // K4 MUST be non-zero for damping - zero K4 causes oscillation!
 // START WITH K1=K2=0: Balance first, then add position control!
 float K_lqr[4] = {
-    -0.0f,        // K1: gain on cart position - DISABLED until balancing works
+    -0.3f,        // K1: gain on cart position - DISABLED until balancing works
     0.0f,        // K2: gain on cart velocity - DISABLED until balancing works
     -126.0f,      // K3: gain on pendulum angle (theta)
-    -8.0f        // K4: gain on angular velocity (theta_dot) - CRITICAL for stability!
+    -5.0f        // K4: gain on angular velocity (theta_dot) - CRITICAL for stability!
 };
 
 // Scaling factor to convert force (N) to motor command (0-800)
@@ -81,7 +81,7 @@ const float FORCE_TO_CMD_SCALE = 95.81f;
 
 // ---------- Setpoints ----------
 const float THETA_SETPOINT = 0.0f;   // Target angle: 0 = upright (radians)
-const float X_SETPOINT = 0.0f;       // Target position: 0 meters (origin)
+const float X_SETPOINT = -2.0f;       // Target position: 0 meters (origin)
 
 // ---------- Control loop timing ----------
 const float LOOP_DT_S = 0.001f;      // 1ms = 1000 Hz control loop
