@@ -2,9 +2,12 @@
 
 // --- CONFIGURATION ---
 // Enter the CPR (Counts Per Revolution) from your specific part number.
-// Refer to the "Resolution CPR" table on Page 6 of the datasheet.
-// Common values: 360, 500, 1000, 2048[cite: 171].
-const float ENCODER_CPR = 1000; 
+// Refer to the ordering table on Page 6 of the datasheet.
+// This code uses full quadrature decoding, so the effective counts per
+// revolution is ENCODER_CPR * QUADRATURE_MULTIPLIER.
+const long ENCODER_CPR = 1000;
+const long QUADRATURE_MULTIPLIER = 4;
+const long COUNTS_PER_REV = ENCODER_CPR * QUADRATURE_MULTIPLIER;
 
 // --- PINS ---
 const int pinA = 2; // Channel A connected to Pin 2
@@ -13,65 +16,106 @@ const int pinB = 3; // Channel B connected to Pin 3
 
 // --- VARIABLES ---
 volatile long encoderCount = 0; // "volatile" because it changes inside an interrupt
+volatile unsigned long invalidTransitionCount = 0;
+volatile uint8_t lastEncoderState = 0;
+
 long lastReportedCount = 0;
+unsigned long lastReportedInvalidTransitions = 0;
+unsigned long lastReportMs = 0;
+bool hasReported = false;
+
+uint8_t readEncoderState() {
+  return (digitalRead(pinA) << 1) | digitalRead(pinB);
+}
 
 void setup() {
-  Serial.begin(9600);
+  Serial.begin(115200);
   while (!Serial); // Wait for Serial Monitor to open
 
-  // Configure pins
-  pinMode(pinA, INPUT_PULLUP); // Use internal pullup to ensure clean high signal
-  pinMode(pinB, INPUT_PULLUP);
+  // The AS22 single-ended version provides TTL outputs, so external pullups
+  // are not required for a healthy signal.
+  pinMode(pinA, INPUT);
+  pinMode(pinB, INPUT);
 
-  // Attach interrupt to Pin A
-  // We trigger on the RISING edge of Channel A
-  attachInterrupt(digitalPinToInterrupt(pinA), updateEncoder, RISING);
+  lastEncoderState = readEncoderState();
+
+  // Decode both channels on every edge so we can detect missed/invalid states.
+  attachInterrupt(digitalPinToInterrupt(pinA), updateEncoder, CHANGE);
+  attachInterrupt(digitalPinToInterrupt(pinB), updateEncoder, CHANGE);
 
   Serial.println("AS22 Encoder Test Initialized");
   Serial.print("Assumed CPR: ");
   Serial.println(ENCODER_CPR);
+  Serial.print("Quadrature multiplier: x");
+  Serial.println(QUADRATURE_MULTIPLIER);
+  Serial.print("Effective counts/rev: ");
+  Serial.println(COUNTS_PER_REV);
 }
 
 void loop() {
-  // Create a snapshot of the count safely
-  // (Interrupts continue in background, so we grab a copy to print)
   long currentCount;
+  unsigned long invalidTransitions;
   noInterrupts();
   currentCount = encoderCount;
+  invalidTransitions = invalidTransitionCount;
   interrupts();
 
-  // Only print if the position has changed
-  // if (currentCount != lastReportedCount) {
-    
-  // Calculate Angle in Degrees
-  // Formula: (Count / CPR) * 360
-  float angle = (currentCount % (long)ENCODER_CPR) * 360.0 / ENCODER_CPR;
-  
-  // Handle negative angles for neatness
+  unsigned long now = millis();
+  if (hasReported &&
+      currentCount == lastReportedCount &&
+      invalidTransitions == lastReportedInvalidTransitions &&
+      (now - lastReportMs) < 50) {
+    return;
+  }
+
+  long wrappedCount = currentCount % COUNTS_PER_REV;
+  float angle = wrappedCount * 360.0f / COUNTS_PER_REV;
   if (angle < 0) angle += 360.0;
 
   Serial.print("Count: ");
   Serial.print(currentCount);
-  Serial.print("\t Angle: ");
+  Serial.print("\tAngle: ");
   Serial.print(angle, 2); // Print with 2 decimal places
-  Serial.println(" deg");
+  Serial.print(" deg\tInvalid transitions: ");
+  Serial.println(invalidTransitions);
 
+  hasReported = true;
   lastReportedCount = currentCount;
-  // }
-  
-  delay(10); // Short delay to prevent serial spamming
+  lastReportedInvalidTransitions = invalidTransitions;
+  lastReportMs = now;
 }
 
 // --- INTERRUPT SERVICE ROUTINE (ISR) ---
-// This runs every time Pin A goes from LOW to HIGH
+// This runs every time Channel A or B changes.
 void updateEncoder() {
-  // Read the state of Channel B to determine direction
-  // If A leads B (A=High, B=Low), it is usually Clockwise 
-  int stateB = digitalRead(pinB);
+  uint8_t currentState = readEncoderState();
+  uint8_t transition = (lastEncoderState << 2) | currentState;
 
-  if (stateB == LOW) {
-    encoderCount++; // Clockwise
-  } else {
-    encoderCount--; // Counter-Clockwise
+  switch (transition) {
+    case 0b0010:
+    case 0b1011:
+    case 0b1101:
+    case 0b0100:
+      encoderCount++;
+      break;
+
+    case 0b0001:
+    case 0b0111:
+    case 0b1110:
+    case 0b1000:
+      encoderCount--;
+      break;
+
+    case 0b0000:
+    case 0b0101:
+    case 0b1010:
+    case 0b1111:
+      break;
+
+    default:
+      invalidTransitionCount++;
+      break;
   }
+
+  lastEncoderState = currentState;
 }

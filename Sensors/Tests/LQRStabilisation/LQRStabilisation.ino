@@ -68,10 +68,10 @@ float l = 0.5f;                  // Distance from pivot to pendulum CoM (m)
 // K4 MUST be non-zero for damping - zero K4 causes oscillation!
 // START WITH K1=K2=0: Balance first, then add position control!
 float K_lqr[4] = {
-    -0.3f,        // K1: gain on cart position - DISABLED until balancing works
+    -0.0f,        // K1: gain on cart position - DISABLED until balancing works
     0.0f,        // K2: gain on cart velocity - DISABLED until balancing works
-    -126.0f,      // K3: gain on pendulum angle (theta)
-    -5.0f        // K4: gain on angular velocity (theta_dot) - CRITICAL for stability!
+    -40.0f,      // K3: gain on pendulum angle (theta)
+    -25.0f        // K4: gain on angular velocity (theta_dot) - CRITICAL for stability!
 };
 
 // Scaling factor to convert force (N) to motor command (0-800)
@@ -90,7 +90,7 @@ const float LOOP_DT_S = 0.001f;      // 1ms = 1000 Hz control loop
 const float VELOCITY_FILTER_ALPHA = 0.05f;  // Reduced from 0.2 - heavy smoothing to reduce jitter
 
 // ---------- Moving average filter for encoder measurements ----------
-const int MA_FILTER_SIZE = 3;   // Reduced from 10 to minimize lag (6ms vs 20ms)
+const int MA_FILTER_SIZE = 5;   // Reduced from 10 to minimize lag (6ms vs 20ms)
 float theta_ma_buffer[MA_FILTER_SIZE] = {0};  // Buffer for pendulum angle
 float x_ma_buffer[MA_FILTER_SIZE] = {0};      // Buffer for cart position
 int ma_buffer_index = 0;                       // Current index in circular buffer
