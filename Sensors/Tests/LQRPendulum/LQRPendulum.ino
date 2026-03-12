@@ -182,10 +182,19 @@ float K4 =  -20.2750f;    // N.s / rad  (negative)
 // Set to 0.0 during initial bring-up.  Compute from augmented Python script.
 float K5_integral = -0.0f;   // N / (m.s)
 
-float X_SETPOINT = 0.0f;    // target cart position (m)
+float X_TARGET   = -2.0f;    // commanded cart position (m)
+float X_SETPOINT = 0.0f;    // governed cart position reference used by LQR (m)
 
 // --- Loop timing -------------------------------------------------------------
 const float LOOP_DT_S = 0.002f;   // 2 ms = 500 Hz
+
+// --- Position reference governor -------------------------------------------
+// Large step changes in x_ref make the LQR fight position error too hard and
+// sacrifice angle stability.  Move the reference slowly and only while upright.
+const float X_REF_SLEW_RATE = 0.1f;        // m/s
+const float X_REF_MAX_STEP  = X_REF_SLEW_RATE * LOOP_DT_S;
+const float X_REF_MOVE_ANGLE_THRESHOLD = 0.10f; // rad  (~5.7 deg)
+const float X_REF_MOVE_RATE_THRESHOLD  = 0.75f; // rad/s
 
 // --- Derivative low-pass filter coefficients ---------------------------------
 //  Lower = heavier smoothing (more lag, less noise).
@@ -231,6 +240,12 @@ static inline int16_t clampCmd(int16_t v) {
 
 static inline float clampF(float v, float lo, float hi) {
     return (v < lo) ? lo : (v > hi) ? hi : v;
+}
+
+static inline float moveToward(float current, float target, float maxStep) {
+    if (target > current + maxStep) return current + maxStep;
+    if (target < current - maxStep) return current - maxStep;
+    return target;
 }
 
 // ============================================================================
@@ -347,6 +362,15 @@ int16_t computeLQR(float x, float x_dot, float theta, float theta_dot) {
     return clampCmd((int16_t)(u * FORCE_TO_CMD_SCALE));
 }
 
+void updateReferenceGovernor(float theta, float theta_dot) {
+    bool uprightEnough = fabsf(theta) <= X_REF_MOVE_ANGLE_THRESHOLD
+                      && fabsf(theta_dot) <= X_REF_MOVE_RATE_THRESHOLD;
+
+    if (uprightEnough) {
+        X_SETPOINT = moveToward(X_SETPOINT, X_TARGET, X_REF_MAX_STEP);
+    }
+}
+
 // ============================================================================
 //  HARDWARE SETUP
 // ============================================================================
@@ -421,9 +445,13 @@ void setup() {
     Serial.println("");
     Serial.println("*** RUN lqr_design.py AND PASTE K VALUES BEFORE USE ***");
     Serial.println("");
+    Serial.print("Reference slew rate: "); Serial.print(X_REF_SLEW_RATE, 2);
+    Serial.println(" m/s");
+    Serial.println("Position reference only advances when pendulum is near upright.");
+    Serial.println("");
     Serial.println("Commands:");
     Serial.println("  r     = recalibrate (hold pendulum upright first)");
-    Serial.println("  t/y/u = target 0.0 / 0.5 / 1.0 m");
+    Serial.println("  t/y/u/i = target 0.0 / 0.5 / 1.0 / 2.0 m");
     Serial.println("  1/2   = K1 more/less negative  (position)");
     Serial.println("  3/4   = K2 more/less negative  (velocity)");
     Serial.println("  5/6   = K3 more/less negative  (angle)");
@@ -449,13 +477,15 @@ void handleSerial() {
             interrupts();
             theta_dot_filt = 0; x_dot_filt = 0;
             prev_theta = 0; prev_x = 0; x_integral = 0;
+            X_TARGET = 0.0f; X_SETPOINT = 0.0f;
             maReset();
             Serial.println(">> Recalibrated.");
             break;
 
-        case 't': X_SETPOINT = 0.0f; x_integral = 0; Serial.println(">> Target 0.0 m"); break;
-        case 'y': X_SETPOINT = 0.5f; x_integral = 0; Serial.println(">> Target 0.5 m"); break;
-        case 'u': X_SETPOINT = 1.0f; x_integral = 0; Serial.println(">> Target 1.0 m"); break;
+        case 't': X_TARGET = 0.0f; x_integral = 0; Serial.println(">> Target 0.0 m"); break;
+        case 'y': X_TARGET = 0.5f; x_integral = 0; Serial.println(">> Target 0.5 m"); break;
+        case 'u': X_TARGET = 1.0f; x_integral = 0; Serial.println(">> Target 1.0 m"); break;
+        case 'i': X_TARGET = 2.0f; x_integral = 0; Serial.println(">> Target 2.0 m"); break;
 
         case '1': K1 -= 2.0f;  Serial.print(">> K1 = "); Serial.println(K1, 3); break;  // more negative = stronger
         case '2': K1 = min(0.0f, K1 + 2.0f); Serial.print(">> K1 = "); Serial.println(K1, 3); break;
@@ -479,6 +509,7 @@ void handleSerial() {
             Serial.print("  K3  = "); Serial.println(K3, 4);
             Serial.print("  K4  = "); Serial.println(K4, 4);
             Serial.print("  K5  = "); Serial.println(K5_integral, 4);
+            Serial.print("  X_TARGET   = "); Serial.print(X_TARGET, 2); Serial.println(" m");
             Serial.print("  X_SETPOINT = "); Serial.print(X_SETPOINT, 2); Serial.println(" m");
             Serial.print("  x_integral = "); Serial.println(x_integral, 5);
             break;
@@ -519,6 +550,10 @@ void loop() {
     prev_theta = theta_ma;
     prev_x     = x_ma;
 
+    // Balance-first position control: advance x reference gradually and only
+    // while the pendulum is close enough to upright.
+    updateReferenceGovernor(theta_filt, theta_dot_filt);
+
     // 4. Safety cutoff: if pendulum has fallen too far, disable motors.
     //    The linear LQR is only valid near the upright equilibrium.
     if (fabsf(theta_filt) > 0.52f) {   // ~30 degrees
@@ -536,6 +571,7 @@ void loop() {
         lastPrintMillis = millis();
         Serial.print("x:");    Serial.print(x_filt, 3);
         Serial.print(" ref:"); Serial.print(X_SETPOINT, 2);
+        Serial.print(" tgt:"); Serial.print(X_TARGET, 2);
         Serial.print(" th:");  Serial.print(theta_filt * RAD_TO_DEG, 2);
         Serial.print(" thd:"); Serial.print(theta_dot_filt, 2);
         Serial.print(" cmd:"); Serial.print(lastCmd);
