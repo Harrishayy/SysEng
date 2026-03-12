@@ -137,7 +137,9 @@ const float CART_ENCODER_CPR  = 464.64f;   // corrected from 465.6
 const float CART_WHEEL_RADIUS = 0.04f;     // metres -- verify this!
 const int   cartPinA          = 24;
 const int   cartPinB          = 26;
-volatile long cartEncoderCount = 0;
+volatile long          cartEncoderCount        = 0;
+volatile uint8_t       lastCartEncoderState    = 0;
+volatile unsigned long invalidCartTransitions  = 0;
 
 // ============================================================================
 //  PHYSICAL PARAMETERS
@@ -171,14 +173,14 @@ const float FORCE_TO_CMD_SCALE = 54.33f;
 //  K1 < 0 (position),   K2 < 0 (velocity),
 //  K3 < 0 (angle),      K4 < 0 (angular rate)
 //
-float K1 =  -22.3607f;     // N / m
-float K2 =  -31.3222f;     // N.s / m
+float K1 =  22.3607f;     // N / m
+float K2 =  31.3222f;     // N.s / m
 float K3 = -213.9713f;    // N / rad    (negative -- see header explanation)
-float K4 =  -51.2750f;    // N.s / rad  (negative)
+float K4 =  -20.2750f;    // N.s / rad  (negative)
 
 // Optional LQI integral term.  Eliminates steady-state position offset.
 // Set to 0.0 during initial bring-up.  Compute from augmented Python script.
-float K5_integral = 0.0f;   // N / (m.s)
+float K5_integral = -0.0f;   // N / (m.s)
 
 float X_SETPOINT = 0.0f;    // target cart position (m)
 
@@ -302,14 +304,22 @@ void updateEncoder() {
     lastPendulumEncoderState = cur;
 }
 
-// Full quadrature for cart (Pololu motor encoder)
-void updateCartA() {
-    if (digitalRead(cartPinA) == digitalRead(cartPinB)) cartEncoderCount++;
-    else                                                 cartEncoderCount--;
+// Full 4-state quadrature decoder for cart (Pololu motor encoder)
+// Uses the same state-machine approach as the pendulum encoder to reject
+// EMI-induced phantom counts from motor PWM switching noise.
+uint8_t cartEncoderState() {
+    return (uint8_t)((digitalRead(cartPinA) << 1) | digitalRead(cartPinB));
 }
-void updateCartB() {
-    if (digitalRead(cartPinA) != digitalRead(cartPinB)) cartEncoderCount++;
-    else                                                 cartEncoderCount--;
+void updateCartEncoder() {
+    uint8_t cur   = cartEncoderState();
+    uint8_t trans = (lastCartEncoderState << 2) | cur;
+    switch (trans) {
+        case 0b0010: case 0b1011: case 0b1101: case 0b0100: cartEncoderCount++; break;
+        case 0b0001: case 0b0111: case 0b1110: case 0b1000: cartEncoderCount--; break;
+        case 0b0000: case 0b0101: case 0b1010: case 0b1111: break;
+        default: invalidCartTransitions++; break;
+    }
+    lastCartEncoderState = cur;
 }
 
 // ============================================================================
@@ -373,8 +383,9 @@ void setupEncoders() {
 
     pinMode(cartPinA, INPUT_PULLUP);
     pinMode(cartPinB, INPUT_PULLUP);
-    attachInterrupt(digitalPinToInterrupt(cartPinA), updateCartA, CHANGE);
-    attachInterrupt(digitalPinToInterrupt(cartPinB), updateCartB, CHANGE);
+    lastCartEncoderState = cartEncoderState();
+    attachInterrupt(digitalPinToInterrupt(cartPinA), updateCartEncoder, CHANGE);
+    attachInterrupt(digitalPinToInterrupt(cartPinB), updateCartEncoder, CHANGE);
 
     delay(100);
     noInterrupts();
@@ -528,7 +539,8 @@ void loop() {
         Serial.print(" th:");  Serial.print(theta_filt * RAD_TO_DEG, 2);
         Serial.print(" thd:"); Serial.print(theta_dot_filt, 2);
         Serial.print(" cmd:"); Serial.print(lastCmd);
-        Serial.print(" inv:"); Serial.println(invalidPendulumTransitions);
+        Serial.print(" inv:"); Serial.print(invalidPendulumTransitions);
+        Serial.print(" cinv:"); Serial.println(invalidCartTransitions);
     }
 }
 
