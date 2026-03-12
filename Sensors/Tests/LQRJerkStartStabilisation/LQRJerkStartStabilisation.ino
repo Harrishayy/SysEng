@@ -55,15 +55,15 @@ float l = 0.5f;    // Pendulum length to CoM (m)
 
 // --- ANGLE STABILIZATION GAINS (Primary - always active) ---
 // These keep the pole upright. K3 and K4 are most critical.
-float K3_theta = -80.0f;      // Gain on angle error (proportional)
-float K4_theta_dot = -50.0f;  // Gain on angular velocity (derivative/damping)
+float K3_theta = -110.0f;      // Gain on angle error (proportional)
+float K4_theta_dot = -0.0f;  // Gain on angular velocity (derivative/damping)
                                // THIS MUST BE NON-ZERO! Provides essential damping.
 
 // --- POSITION CONTROL GAINS (Secondary - conditional) ---
 // These are intentionally weak to avoid fighting the stabilization loop.
 // Position control generates a "desired lean angle" that modifies theta setpoint.
 float Kp_pos = 0.0f;          // Position proportional gain (m -> rad lean)
-float Kd_pos = 15.0f;          // Position derivative gain (m/s -> rad lean)
+float Kd_pos = 0.0f;          // Position derivative gain (m/s -> rad lean)
 
 // Maximum lean angle that position control can request (radians)
 // ~5 degrees - keeps pole in linear region
