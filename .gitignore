@@ -10,3 +10,5 @@ dist/
 build/
 .vscode/
 latex_section.md
+.venv/
+.requirements.txt

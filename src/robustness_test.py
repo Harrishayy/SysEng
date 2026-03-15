@@ -63,9 +63,9 @@ def test_stability(
             actual_force += disturbance_N
             disturbance_applied = True
         
-        # Integrate
+        # Integrate (with physical hard stop at bottom)
         state_dot = cart_pole.dynamics(t, state, actual_force)
-        state = state + state_dot * dt
+        state = cart_pole.apply_constraints(state + state_dot * dt)
         
         # Filter
         _, filtered_state = state_processor.process(state)
@@ -140,35 +140,36 @@ def run_robustness_tests():
     print("Controller Robustness Testing")
     print("=" * 60)
     
-    # Setup
+    # Setup — physical parameters match LQRPendulum.ino hardware
     cart_pole = CartPole(
-        cart_mass=1.0, pendulum_mass=0.05, rod_length=0.8,
-        cart_friction=0.1, rotational_damping=0.01, gravity=9.81
+        cart_mass=1.2, pendulum_mass=0.91, rod_length=0.5,
+        cart_friction=0.1, rotational_damping=0.01, gravity=9.81,
+        rod_full_length=0.6
     )
-    
+
     motor = MotorModel(
-        num_motors=4, wheel_radius=0.03,
-        voltage_min=1.0, voltage_max=12.0,
-        rpm_at_nominal=170.0, voltage_nominal=12.0
+        num_motors=4, wheel_radius=0.04,
+        voltage_min=0.0, voltage_max=10.6,
+        rpm_at_nominal=800.0, voltage_nominal=12.0
     )
-    
+
     state_processor = NoisyStateProcessor(
         position_noise_std=0.005, angle_noise_std=0.01,
-        tau_position=0.1, tau_angle=0.08, dt=0.02
+        dt=0.02
     )
-    
-    # Controllers with tuned parameters for LP 12V motor
-    pid = PIDController(x_target=2.0)  # Uses optimized defaults
+
+    # Controllers use b=0, c=0 for linearisation (matching .ino which omits friction)
+    pid = PIDController(x_target=2.0)
     lqr = LQRController(
         cart_mass=cart_pole.M, pendulum_mass=cart_pole.m,
-        rod_length=cart_pole.L, cart_friction=cart_pole.b,
-        rotational_damping=cart_pole.c, gravity=cart_pole.g
-    )  # Uses optimized Q and R defaults
+        rod_length=cart_pole.L, cart_friction=0.0,
+        rotational_damping=0.0, gravity=cart_pole.g
+    )
     pole_placement = PolePlacementController(
         cart_mass=cart_pole.M, pendulum_mass=cart_pole.m,
-        rod_length=cart_pole.L, cart_friction=cart_pole.b,
-        rotational_damping=cart_pole.c, gravity=cart_pole.g
-    )  # Uses optimized pole defaults
+        rod_length=cart_pole.L, cart_friction=0.0,
+        rotational_damping=0.0, gravity=cart_pole.g
+    )
     
     controllers = [
         (pid, 'PID'),

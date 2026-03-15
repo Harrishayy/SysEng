@@ -16,12 +16,19 @@ class CartPole:
         rod_length: float = 0.8,
         cart_friction: float = 0.1,
         rotational_damping: float = 0.01,
-        gravity: float = 9.81
+        gravity: float = 9.81,
+        rod_full_length: float = None
     ):
-        """Initialize with physical parameters."""
+        """Initialize with physical parameters.
+
+        rod_length     — pivot-to-CoM distance (used in dynamics), e.g. 0.5 m
+        rod_full_length — physical rod tip distance for visualization only;
+                          defaults to rod_length if not provided, e.g. 0.6 m
+        """
         self.M = cart_mass          # kg
         self.m = pendulum_mass      # kg
-        self.L = rod_length         # m
+        self.L = rod_length         # m  (pivot to CoM — used in equations of motion)
+        self.L_full = rod_full_length if rod_full_length is not None else rod_length  # m (visual rod tip)
         self.b = cart_friction      # N/(m/s)
         self.c = rotational_damping # N*m/(rad/s)
         self.g = gravity            # m/s^2
@@ -61,15 +68,37 @@ class CartPole:
         
         return np.array([x_dot, x_ddot, theta_dot, theta_ddot])
     
+    def apply_constraints(self, state: np.ndarray) -> np.ndarray:
+        """Apply physical hard stop: pendulum cannot rotate past bottom (θ = ±π).
+
+        In hardware the rod cannot pass through the cart rail, so spinning is
+        impossible.  Model this as an inelastic stop at ±π.
+        """
+        if abs(state[self.THETA]) >= np.pi / 2:
+            state = state.copy()
+            state[self.THETA] = np.sign(state[self.THETA]) * np.pi / 2
+            state[self.THETA_DOT] = 0.0
+        return state
+
     def get_pendulum_position(self, state: np.ndarray) -> tuple:
-        """Get pendulum bob position (x, y) in world coordinates."""
+        """Get pendulum CoM position (x, y) relative to cart pivot."""
         x = state[self.X]
         theta = state[self.THETA]
-        
+
         pendulum_x = x + self.L * np.sin(theta)
         pendulum_y = self.L * np.cos(theta)
-        
+
         return pendulum_x, pendulum_y
+
+    def get_rod_tip_position(self, state: np.ndarray) -> tuple:
+        """Get physical rod tip position (x, y) relative to cart pivot."""
+        x = state[self.X]
+        theta = state[self.THETA]
+
+        tip_x = x + self.L_full * np.sin(theta)
+        tip_y = self.L_full * np.cos(theta)
+
+        return tip_x, tip_y
     
     def get_energy(self, state: np.ndarray) -> dict:
         """Compute kinetic, potential, and total energy."""
