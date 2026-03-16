@@ -2,19 +2,6 @@
 
 Physical cart-pole robot with Python simulation and Arduino firmware. Implements LQR, PID, and Pole Placement controllers for balancing an inverted pendulum while moving the cart to a target position.
 
-```mermaid
-graph LR
-    subgraph sim ["Python Simulation"]
-        direction TB
-        CP["cart_pole.py\nDynamics"] & CTRL["controller.py\nPID · LQR · PP"] & MOT["motor.py\nDC Motor"] & SF["state_filter.py\nNoise + Filter"]
-    end
-    subgraph hw ["Physical Hardware"]
-        direction TB
-        ENC1["Broadcom AS22\nPendulum encoder"] & ENC2["Pololu encoder\nCart encoder"] --> ARD["Arduino Giga\nLQRPendulum.ino"]
-        ARD --> DRV["Motoron M3S550\nMotor driver"] --> MOTORS["4× Pololu #4862\nDC motors"]
-    end
-```
-
 ## Repository Structure
 
 ```
@@ -29,10 +16,12 @@ src/                            # Python simulation
 └── metrics.py                  # Performance metrics output
 
 Sensors/Tests/                  # Arduino firmware (physical hardware)
-├── LQRPendulum/                # Current LQR controller (500 Hz, reference governor, LQI)
-├── LQRJerkStartStabilisation/  # LQR with jerk-start swing-up sequence
-├── PIDStabilisation/           # PID controller on hardware
-├── PolePlacementStabilisation/ # Pole placement on hardware
+├── LQRPendulum/                         # LQR controller (500 Hz, reference governor, LQI)
+├── LQRJerkStartStabilisation/           # LQR with jerk-start swing-up sequence
+├── PolePlacementPendulum/               # Pole placement controller
+├── PolePlacementJerkStartStabilisation/ # Pole placement with jerk-start
+├── PIDStabilisation/                    # Cascaded PID controller
+├── PIDJerkStartStabilisation/           # Cascaded PID with jerk-start
 ├── Motors/                     # Motor direction / speed test
 ├── OpticalSensor/              # Pendulum encoder test
 ├── GetRawAngle/                # Read raw pendulum angle over serial
@@ -75,23 +64,6 @@ Sensors/Tests/                  # Arduino firmware (physical hardware)
 ## Control Algorithms
 
 All controllers share dual objectives: keep the pendulum upright (θ = 0) and drive the cart to a target position.
-
-```mermaid
-block-beta
-    columns 5
-    ref(["x_ref"]):1
-    space:1
-    ctrl["Controller\nPID / LQR / PP"]:1
-    space:1
-    plant["Plant\nCart-Pole"]:1
-
-    plant --> sensors["Sensors\n& Filter"]:1
-    sensors --> fb((" ")):1
-    fb --> ctrl
-    ref --> fb
-    ctrl --> motor["Motor\nModel"]:1
-    motor --> plant
-```
 
 ### Cascaded PID (simulation)
 
@@ -137,21 +109,6 @@ python main_interactive.py   # Interactive GUI (50 Hz, matplotlib)
 python generate_plots.py     # Controller comparison plots → plots/
 python robustness_test.py    # Max recoverable angle / disturbance tests
 python metrics.py            # Print performance metrics
-```
-
-## Hardware Firmware Loop
-
-```mermaid
-flowchart TD
-    T([500 Hz tick]) --> R["Read encoders\nθ_raw, x_raw"]
-    R --> MA["5-sample moving average\nθ_ma, x_ma"]
-    MA --> D["Numerical derivative\n+ exponential low-pass filter\nθ_dot, x_dot"]
-    D --> G["Reference governor\nadvance x_ref → x_target\nat 0.1 m/s if near upright"]
-    G --> S{"|θ| > 0.52 rad\n(~30°)?"}
-    S -- Yes --> OFF["Motors off\nreset x_integral"]
-    S -- No --> L["LQR\nu = −(K1·Δx + K2·ẋ + K3·θ + K4·θ̇ + K5·∫Δx)"]
-    L --> C["Scale & clamp\ncmd = u × 54.33,  ∈ [−800, +800]"]
-    C --> M["Motoron M3S550\nsetSpeed × 4 motors"]
 ```
 
 ## Hardware Usage
