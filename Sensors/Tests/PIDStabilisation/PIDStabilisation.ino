@@ -71,7 +71,16 @@ const float MAX_ANGLE_SETPOINT = 0.09f;   // rad  (~5.2 deg) -- matches sim clam
 const float ANGLE_INTEGRAL_CLAMP = 100.0f;
 const float POS_INTEGRAL_CLAMP   = 10.0f;
 
-float X_TARGET = 0.0f;   // commanded cart position (m)
+float X_TARGET   = 0.0f;   // commanded cart position (m)
+float X_SETPOINT = 0.0f;   // governed reference sent to PID outer loop (m)
+
+// --- Position reference governor -------------------------------------------
+// Advances X_SETPOINT toward X_TARGET at a limited slew rate, and only while
+// the pendulum is close enough to upright (matches LQRPendulum.ino behaviour).
+const float X_REF_SLEW_RATE            = 0.1f;                          // m/s
+const float X_REF_MAX_STEP             = X_REF_SLEW_RATE * 0.002f;      // m/tick @ 500 Hz
+const float X_REF_MOVE_ANGLE_THRESHOLD = 0.10f;                         // rad (~5.7 deg)
+const float X_REF_MOVE_RATE_THRESHOLD  = 0.75f;                         // rad/s
 
 // ============================================================================
 //  LOOP TIMING
@@ -127,6 +136,12 @@ static inline int16_t clampCmd(int16_t v) {
 
 static inline float clampF(float v, float lo, float hi) {
     return (v < lo) ? lo : (v > hi) ? hi : v;
+}
+
+static inline float moveToward(float cur, float tgt, float step) {
+    if (tgt > cur + step) return cur + step;
+    if (tgt < cur - step) return cur - step;
+    return tgt;
 }
 
 // ============================================================================
@@ -227,7 +242,7 @@ void updateCartEncoder() {
 int16_t computePID(float x, float x_dot, float theta, float theta_dot) {
 
     // --- Outer loop: position --> angle setpoint ----------------------------
-    float pos_error = X_TARGET - x;
+    float pos_error = X_SETPOINT - x;
     pos_integral = clampF(pos_integral + pos_error * LOOP_DT_S,
                           -POS_INTEGRAL_CLAMP, POS_INTEGRAL_CLAMP);
     float angle_setpoint = KP_POS * pos_error
@@ -246,6 +261,18 @@ int16_t computePID(float x, float x_dot, float theta, float theta_dot) {
     force = clampF(force, -100.0f, 100.0f);
 
     return clampCmd((int16_t)(force * FORCE_TO_CMD_SCALE));
+}
+
+// ============================================================================
+//  REFERENCE GOVERNOR  (identical to LQRPendulum.ino / PolePlacementPendulum.ino)
+// ============================================================================
+
+void updateReferenceGovernor(float theta, float theta_dot) {
+    bool uprightEnough = fabsf(theta)     <= X_REF_MOVE_ANGLE_THRESHOLD
+                      && fabsf(theta_dot) <= X_REF_MOVE_RATE_THRESHOLD;
+    if (uprightEnough) {
+        X_SETPOINT = moveToward(X_SETPOINT, X_TARGET, X_REF_MAX_STEP);
+    }
 }
 
 // ============================================================================
@@ -341,15 +368,15 @@ void handleSerial() {
             theta_dot_filt = 0; x_dot_filt = 0;
             prev_theta = 0; prev_x = 0;
             angle_integral = 0; pos_integral = 0;
-            X_TARGET = 0.0f;
+            X_TARGET = 0.0f; X_SETPOINT = 0.0f;
             maReset();
             Serial.println(">> Recalibrated.");
             break;
 
-        case 't': X_TARGET = 0.0f; pos_integral = 0; Serial.println(">> Target 0.0 m"); break;
-        case 'y': X_TARGET = 0.5f; pos_integral = 0; Serial.println(">> Target 0.5 m"); break;
-        case 'u': X_TARGET = 1.0f; pos_integral = 0; Serial.println(">> Target 1.0 m"); break;
-        case 'i': X_TARGET = 2.0f; pos_integral = 0; Serial.println(">> Target 2.0 m"); break;
+        case 't': X_TARGET = 0.0f; Serial.println(">> Target 0.0 m"); break;
+        case 'y': X_TARGET = 0.5f; Serial.println(">> Target 0.5 m"); break;
+        case 'u': X_TARGET = 1.0f; Serial.println(">> Target 1.0 m"); break;
+        case 'i': X_TARGET = 2.0f; Serial.println(">> Target 2.0 m"); break;
 
         case 'p':
             Serial.println("\n--- Current PID Gains ---");
@@ -359,7 +386,8 @@ void handleSerial() {
             Serial.print("  KP_POS = "); Serial.println(KP_POS, 4);
             Serial.print("  KI_POS = "); Serial.println(KI_POS, 4);
             Serial.print("  KD_POS = "); Serial.println(KD_POS, 4);
-            Serial.print("  X_TARGET = "); Serial.print(X_TARGET, 2); Serial.println(" m");
+            Serial.print("  X_TARGET   = "); Serial.print(X_TARGET, 2); Serial.println(" m");
+            Serial.print("  X_SETPOINT = "); Serial.print(X_SETPOINT, 2); Serial.println(" m");
             break;
     }
 }
@@ -398,7 +426,10 @@ void loop() {
     prev_theta = theta_ma;
     prev_x     = x_ma;
 
-    // 4. Safety cutoff: PID linearisation only valid near upright
+    // 4. Reference governor: advance X_SETPOINT toward X_TARGET while upright
+    updateReferenceGovernor(theta_filt, theta_dot_filt);
+
+    // 5. Safety cutoff: PID linearisation only valid near upright
     if (fabsf(theta_filt) > 0.52f) {   // ~30 degrees
         setAllMotors(0);
         angle_integral = 0;
@@ -409,10 +440,11 @@ void loop() {
         setAllMotors(lastCmd);
     }
 
-    // 5. Telemetry at 10 Hz
+    // 6. Telemetry at 10 Hz
     if (millis() - lastPrintMillis >= 100) {
         lastPrintMillis = millis();
         Serial.print("x:");    Serial.print(x_filt, 3);
+        Serial.print(" ref:"); Serial.print(X_SETPOINT, 2);
         Serial.print(" tgt:"); Serial.print(X_TARGET, 2);
         Serial.print(" th:");  Serial.print(theta_filt * RAD_TO_DEG, 2);
         Serial.print(" thd:"); Serial.print(theta_dot_filt, 2);
