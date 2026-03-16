@@ -71,9 +71,9 @@ def run_simulation(
             actual_force = desired_force
             voltage = 0.0
         
-        # Integrate dynamics
+        # Integrate dynamics (with physical hard stop at bottom)
         state_dot = cart_pole.dynamics(t, state, actual_force)
-        state = state + state_dot * dt
+        state = cart_pole.apply_constraints(state + state_dot * dt)
         
         # Add noise and filter
         if use_noise:
@@ -110,35 +110,39 @@ def generate_comparison_plots(
 ):
     """Generate comparison plots for all controllers."""
     
-    # Setup
+    # Setup — physical parameters match LQRPendulum.ino hardware
     cart_pole = CartPole(
-        cart_mass=1.0, pendulum_mass=0.05, rod_length=0.8,
-        cart_friction=0.1, rotational_damping=0.01, gravity=9.81
+        cart_mass=1.2, pendulum_mass=0.91, rod_length=0.5,
+        cart_friction=0.1, rotational_damping=0.01, gravity=9.81,
+        rod_full_length=0.6
     )
-    
+
     motor = MotorModel(
-        num_motors=4, wheel_radius=0.03,
-        voltage_min=1.0, voltage_max=12.0,
-        rpm_at_nominal=170.0, voltage_nominal=12.0
+        num_motors=4, wheel_radius=0.04,
+        voltage_min=0.0, voltage_max=10.6,
+        rpm_at_nominal=800.0, voltage_nominal=12.0
     )
-    
+
     state_processor = NoisyStateProcessor(
         position_noise_std=0.005, angle_noise_std=0.01,
-        tau_position=0.1, tau_angle=0.08, dt=0.02
+        dt=0.02
     )
-    
-    # Controllers - Tuned for LP 12V motor constraints (~4.8N max force)
-    pid = PIDController(x_target=2.0)  # Uses optimized defaults
+
+    # Controllers use b=0, c=0 for linearisation (matching .ino which omits friction)
+    # Setpoint [2,0,0,0]: move cart to 2m while keeping pendulum upright
+    pid = PIDController(x_target=2.0)
     lqr = LQRController(
         cart_mass=cart_pole.M, pendulum_mass=cart_pole.m,
-        rod_length=cart_pole.L, cart_friction=cart_pole.b,
-        rotational_damping=cart_pole.c, gravity=cart_pole.g
-    )  # Uses optimized Q=[1,1,100,10], R=0.5 defaults
+        rod_length=cart_pole.L, cart_friction=0.0,
+        rotational_damping=0.0, gravity=cart_pole.g,
+        setpoint=[2.0, 0.0, 0.0, 0.0]
+    )
     pole_placement = PolePlacementController(
         cart_mass=cart_pole.M, pendulum_mass=cart_pole.m,
-        rod_length=cart_pole.L, cart_friction=cart_pole.b,
-        rotational_damping=cart_pole.c, gravity=cart_pole.g
-    )  # Uses optimized poles=[-1.5,-1.7,-1.9,-2.1] defaults
+        rod_length=cart_pole.L, cart_friction=0.0,
+        rotational_damping=0.0, gravity=cart_pole.g,
+        setpoint=[2.0, 0.0, 0.0, 0.0]
+    )
     
     controllers = [
         (None, 'Uncontrolled'),
@@ -240,9 +244,8 @@ def generate_comparison_plots(
     ax_volt.set_xlabel('Time (s)')
     ax_volt.grid(True, alpha=0.3)
     ax_volt.legend(loc='best')
-    ax_volt.axhline(1.0, color='k', linestyle=':', alpha=0.5, label='V_min')
-    ax_volt.axhline(12.0, color='k', linestyle=':', alpha=0.5, label='V_max')
-    ax_volt.set_ylim(-0.5, 14)
+    ax_volt.axhline(10.6, color='k', linestyle=':', alpha=0.5, label='V_max')
+    ax_volt.set_ylim(-0.5, 12)
     
     plt.tight_layout()
     if save_plots:

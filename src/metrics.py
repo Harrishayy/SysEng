@@ -5,12 +5,20 @@ from controller import PIDController, LQRController, PolePlacementController
 from motor import MotorModel
 from state_filter import NoisyStateProcessor
 
-cart_pole = CartPole()
-motor = MotorModel()
+cart_pole = CartPole(
+    cart_mass=1.2, pendulum_mass=0.91, rod_length=0.5,
+    cart_friction=0.1, rotational_damping=0.01, gravity=9.81,
+    rod_full_length=0.6
+)
+motor = MotorModel(
+    num_motors=4, wheel_radius=0.04,
+    voltage_min=0.0, voltage_max=10.6,
+    rpm_at_nominal=800.0, voltage_nominal=12.0
+)
 
 def analyze(controller):
-    sp = NoisyStateProcessor(position_noise_std=0.005, angle_noise_std=0.01, 
-                             tau_position=0.1, tau_angle=0.08, dt=0.02, seed=42)
+    sp = NoisyStateProcessor(position_noise_std=0.005, angle_noise_std=0.01,
+                             dt=0.02, seed=42)
     state = np.array([0.0, 0.0, np.deg2rad(5.7), 0.0])
     times, positions = [], []
     t = 0.0
@@ -20,7 +28,7 @@ def analyze(controller):
         _, fs = sp.process(state)
         f = controller.compute(fs, t)
         mo = motor.compute_motor_output(f, state[1])
-        state = state + cart_pole.dynamics(t, state, mo['actual_force']) * 0.02
+        state = cart_pole.apply_constraints(state + cart_pole.dynamics(t, state, mo['actual_force']) * 0.02)
         t += 0.02
     
     times, positions = np.array(times), np.array(positions)
@@ -74,13 +82,15 @@ def print_results(name, r):
 pid = PIDController(x_target=2.0)
 lqr = LQRController(
     cart_mass=cart_pole.M, pendulum_mass=cart_pole.m,
-    rod_length=cart_pole.L, cart_friction=cart_pole.b,
-    rotational_damping=cart_pole.c, gravity=cart_pole.g
+    rod_length=cart_pole.L, cart_friction=0.0,
+    rotational_damping=0.0, gravity=cart_pole.g,
+    setpoint=[2.0, 0.0, 0.0, 0.0]
 )
 pp = PolePlacementController(
     cart_mass=cart_pole.M, pendulum_mass=cart_pole.m,
-    rod_length=cart_pole.L, cart_friction=cart_pole.b,
-    rotational_damping=cart_pole.c, gravity=cart_pole.g
+    rod_length=cart_pole.L, cart_friction=0.0,
+    rotational_damping=0.0, gravity=cart_pole.g,
+    setpoint=[2.0, 0.0, 0.0, 0.0]
 )
 
 # Analyze and print
