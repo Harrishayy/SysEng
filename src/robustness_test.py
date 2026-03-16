@@ -6,6 +6,8 @@ from motor import MotorModel
 from state_filter import NoisyStateProcessor
 from controller import PIDController, LQRController, PolePlacementController
 
+SAFETY_ANGLE_CUTOFF = 0.52      # rad (~30 deg) — matches main_interactive.py
+
 
 @dataclass
 class RobustnessResult:
@@ -22,8 +24,9 @@ def test_stability(
     initial_angle_deg: float,
     disturbance_N: float = 0.0,
     disturbance_time: float = 2.0,
-    dt: float = 0.02,
-    duration: float = 10.0
+    dt: float = 0.002,
+    duration: float = 10.0,
+    safety_angle_cutoff: float = None
 ) -> bool:
     """
     Test if controller can stabilize from given initial angle with disturbance.
@@ -37,31 +40,32 @@ def test_stability(
     if hasattr(controller, 'reset'):
         controller.reset()
     
-    disturbance_applied = False
-    disturbance_step = int(disturbance_time / dt)
-    
+    disturbance_start = int(disturbance_time / dt)
+    disturbance_end = disturbance_start + int(0.2 / dt)  # 0.2 s — matches main_interactive
+
     t = 0.0
     for i in range(n_steps):
         # Check if pendulum has fallen
         if abs(state[2]) > np.pi / 2:  # > 90 degrees
             return False
-        
+
         cart_velocity = state[1]
-        
+
         # Compute control
         if controller is None:
             desired_force = 0.0
+        elif safety_angle_cutoff is not None and abs(filtered_state[2]) > safety_angle_cutoff:
+            desired_force = 0.0
         else:
             desired_force = controller.compute(filtered_state, t)
-        
+
         # Motor model
         motor_out = motor.compute_motor_output(desired_force, cart_velocity)
         actual_force = motor_out['actual_force']
-        
-        # Apply disturbance impulse at specified time
-        if i == disturbance_step and disturbance_N != 0.0:
+
+        # Apply disturbance for 0.2 s (matching main_interactive disturbance duration)
+        if disturbance_start <= i < disturbance_end and disturbance_N != 0.0:
             actual_force += disturbance_N
-            disturbance_applied = True
         
         # Integrate (with physical hard stop at bottom)
         state_dot = cart_pole.dynamics(t, state, actual_force)
@@ -83,24 +87,26 @@ def find_max_initial_angle(
     state_processor: NoisyStateProcessor,
     min_angle: float = 5.0,
     max_angle: float = 90.0,
-    tolerance: float = 1.0
+    tolerance: float = 1.0,
+    safety_angle_cutoff: float = None
 ) -> float:
     """Binary search to find maximum initial angle controller can handle."""
     low, high = min_angle, max_angle
-    
+
     while high - low > tolerance:
         mid = (low + high) / 2
-        
+
         # Reset for each test
         state_processor.reset()
         if hasattr(controller, 'reset'):
             controller.reset()
-        
-        if test_stability(cart_pole, controller, motor, state_processor, mid):
+
+        if test_stability(cart_pole, controller, motor, state_processor, mid,
+                          safety_angle_cutoff=safety_angle_cutoff):
             low = mid  # Can handle this angle, try higher
         else:
             high = mid  # Failed, try lower
-    
+
     return low
 
 
@@ -112,25 +118,27 @@ def find_max_disturbance(
     initial_angle_deg: float = 5.0,
     min_dist: float = 0.0,
     max_dist: float = 50.0,
-    tolerance: float = 0.5
+    tolerance: float = 0.5,
+    safety_angle_cutoff: float = None
 ) -> float:
     """Binary search to find maximum disturbance controller can handle."""
     low, high = min_dist, max_dist
-    
+
     while high - low > tolerance:
         mid = (low + high) / 2
-        
+
         # Reset for each test
         state_processor.reset()
         if hasattr(controller, 'reset'):
             controller.reset()
-        
-        if test_stability(cart_pole, controller, motor, state_processor, 
-                         initial_angle_deg, disturbance_N=mid):
+
+        if test_stability(cart_pole, controller, motor, state_processor,
+                          initial_angle_deg, disturbance_N=mid,
+                          safety_angle_cutoff=safety_angle_cutoff):
             low = mid  # Can handle this disturbance, try higher
         else:
             high = mid  # Failed, try lower
-    
+
     return low
 
 
@@ -154,8 +162,8 @@ def run_robustness_tests():
     )
 
     state_processor = NoisyStateProcessor(
-        position_noise_std=0.005, angle_noise_std=0.01,
-        dt=0.02
+        position_noise_std=0.001, angle_noise_std=0.002,
+        dt=0.002
     )
 
     # Controllers use b=0, c=0 for linearisation (matching .ino which omits friction)
@@ -181,20 +189,23 @@ def run_robustness_tests():
     
     for controller, name in controllers:
         print(f"\nTesting {name}...")
-        
+        cutoff = SAFETY_ANGLE_CUTOFF if name in ('LQR', 'Pole Placement') else None
+
         # Test max initial angle
         print("  Finding max initial angle...", end=" ", flush=True)
         max_angle = find_max_initial_angle(
             cart_pole, controller, motor, state_processor,
-            min_angle=5.0, max_angle=60.0, tolerance=1.0
+            min_angle=5.0, max_angle=60.0, tolerance=1.0,
+            safety_angle_cutoff=cutoff
         )
         print(f"{max_angle:.1f}°")
-        
+
         # Test max disturbance (from stable position with 5° initial angle)
         print("  Finding max disturbance...", end=" ", flush=True)
         max_dist = find_max_disturbance(
             cart_pole, controller, motor, state_processor,
-            initial_angle_deg=5.0, min_dist=0.0, max_dist=100.0, tolerance=0.5
+            initial_angle_deg=5.0, min_dist=0.0, max_dist=100.0, tolerance=0.5,
+            safety_angle_cutoff=cutoff
         )
         print(f"{max_dist:.1f} N")
         

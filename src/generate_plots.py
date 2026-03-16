@@ -9,6 +9,8 @@ from controller import PIDController, LQRController, PolePlacementController
 from state_filter import NoisyStateProcessor
 from motor import MotorModel
 
+SAFETY_ANGLE_CUTOFF = 0.52      # rad (~30 deg) — matches main_interactive.py
+
 
 @dataclass
 class SimulationResult:
@@ -29,10 +31,11 @@ def run_simulation(
     motor: MotorModel,
     state_processor: NoisyStateProcessor,
     initial_state: np.ndarray,
-    dt: float = 0.02,
+    dt: float = 0.002,
     duration: float = 10.0,
     use_motor: bool = True,
-    use_noise: bool = True
+    use_noise: bool = True,
+    safety_angle_cutoff: float = None
 ) -> SimulationResult:
     """Run a single simulation with given controller."""
     
@@ -58,6 +61,8 @@ def run_simulation(
         
         # Compute desired force from controller
         if controller is None:
+            desired_force = 0.0
+        elif safety_angle_cutoff is not None and abs(filtered_state[2]) > safety_angle_cutoff:
             desired_force = 0.0
         else:
             desired_force = controller.compute(filtered_state, t)
@@ -124,8 +129,8 @@ def generate_comparison_plots(
     )
 
     state_processor = NoisyStateProcessor(
-        position_noise_std=0.005, angle_noise_std=0.01,
-        dt=0.02
+        position_noise_std=0.001, angle_noise_std=0.002,
+        dt=0.002
     )
 
     # Controllers use b=0, c=0 for linearisation (matching .ino which omits friction)
@@ -162,10 +167,12 @@ def generate_comparison_plots(
     results = []
     for ctrl, name in controllers:
         print(f"  Running {name}...")
+        cutoff = SAFETY_ANGLE_CUTOFF if name in ('LQR', 'Pole Placement') else None
         result = run_simulation(
             cart_pole, ctrl, name, motor, state_processor,
-            initial_state, dt=0.02, duration=duration,
-            use_motor=use_motor, use_noise=use_noise
+            initial_state, dt=0.002, duration=duration,
+            use_motor=use_motor, use_noise=use_noise,
+            safety_angle_cutoff=cutoff
         )
         results.append(result)
     
