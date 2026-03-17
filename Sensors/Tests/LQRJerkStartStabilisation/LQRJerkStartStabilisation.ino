@@ -448,6 +448,7 @@ void setupMotors() {
 
   shield1.reinitialize();
   shield1.clearResetFlag();
+  shield1.clearMotorFaultUnconditional();
   shield1.setMaxAcceleration(1, STABILIZE_RAMP_LIMIT);
   shield1.setMaxDeceleration(1, STABILIZE_RAMP_LIMIT);
   shield1.setMaxAcceleration(2, STABILIZE_RAMP_LIMIT);
@@ -455,6 +456,7 @@ void setupMotors() {
 
   shield2.reinitialize();
   shield2.clearResetFlag();
+  shield2.clearMotorFaultUnconditional();
   shield2.setMaxAcceleration(1, STABILIZE_RAMP_LIMIT);
   shield2.setMaxDeceleration(1, STABILIZE_RAMP_LIMIT);
   shield2.setMaxAcceleration(2, STABILIZE_RAMP_LIMIT);

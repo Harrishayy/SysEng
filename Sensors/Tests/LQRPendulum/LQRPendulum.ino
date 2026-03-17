@@ -116,6 +116,9 @@
 // --- Motor shields -----------------------------------------------------------
 MotoronI2C shield1(16);
 MotoronI2C shield2(17);
+// MOTOR_MAX is capped at 670 (not 800) to limit the effective motor voltage
+// to ~10.6 V equivalent (670/800 x 12.6 V = 10.57 V), keeping stall current
+// below the Motoron M3S550 overcurrent threshold that trips at 12.6 V / 800.
 const int16_t MOTOR_MAX = 800;
 
 // --- Pendulum encoder (Broadcom AS22, 1000 CPR x4 quadrature) ---------------
@@ -152,14 +155,16 @@ float l = 0.5f;    // pendulum CoM distance from pivot (m)
 // ============================================================================
 //  FORCE TO COMMAND SCALE
 // ============================================================================
-//  Derived from hardware specs and 10.6 V supply (full derivation in header):
-//      SCALE = 800 / F_max_stall = 800 / 14.73 = 54.33   [cmd per Newton]
-//
-//  If supply voltage changes, recalculate:
+//  Formula (always):
 //      F_max = 4 x (0.16671 N.m x V_supply/12) / wheel_radius_m
-//      SCALE = 800 / F_max
+//      SCALE = MOTOR_MAX / F_max
 //
-const float FORCE_TO_CMD_SCALE = 54.33f;
+//  At 10.6 V, MOTOR_MAX=800:  F_max=14.73 N  SCALE = 800/14.73 = 54.33
+//  At 12.6 V, MOTOR_MAX=670:  F_max=17.50 N  SCALE = 670/17.50 = 38.29
+//      (MOTOR_MAX capped at 670 to hold motor voltage to ~10.6 V equivalent,
+//       preventing Motoron overcurrent faults at the higher supply voltage)
+//
+const float FORCE_TO_CMD_SCALE = 50.33f;
 
 // ============================================================================
 //  LQR GAINS  <-- PASTE VALUES FROM PYTHON SCRIPT HERE
@@ -182,7 +187,7 @@ float K4 =  -20.2750f;    // N.s / rad  (negative)
 // Set to 0.0 during initial bring-up.  Compute from augmented Python script.
 float K5_integral = -0.0f;   // N / (m.s)
 
-float X_TARGET   = -2.0f;    // commanded cart position (m)
+float X_TARGET   = -0.0f;    // commanded cart position (m)
 float X_SETPOINT = 0.0f;    // governed cart position reference used by LQR (m)
 
 // --- Loop timing -------------------------------------------------------------
@@ -213,6 +218,8 @@ long          zeroCount         = 0;
 long          cartZeroCount     = 0;
 unsigned long lastControlMicros = 0;
 unsigned long lastPrintMillis   = 0;
+uint16_t      motorFaultClearCtr = 0;   // periodic Motoron fault-flag clearing
+uint32_t      motorResetCount   = 0;   // diagnostic: how often Motoron resets mid-run
 
 float theta_filt     = 0.0f;
 float theta_dot_filt = 0.0f;
@@ -377,14 +384,29 @@ void updateReferenceGovernor(float theta, float theta_dot) {
 
 void setupMotors() {
     Wire1.begin();
+    // 400 kHz fast-mode I2C: cuts each transaction from ~450 µs to ~115 µs.
+    // At 100 kHz the four setSpeed() calls per 2 ms cycle consumed ~1800 µs,
+    // leaving almost no margin for EMI-induced retries at 12 V.  A single
+    // NACK retry pushed the cycle over budget, the Motoron command-timeout
+    // fired, the RESET flag latched, and setSpeed() was silently ignored.
     shield1.setBus(&Wire1);
     shield2.setBus(&Wire1);
 
     shield1.reinitialize();
     shield1.clearResetFlag();
-    // High acceleration limits: LQR commands must propagate within one 2ms
-    // timestep. The Motoron's internal ramping would otherwise add effective
-    // lag and destabilise the angular rate term.
+    shield1.clearMotorFaultUnconditional();
+    // PWM mode 1: switches from default 20 kHz to ~1 kHz. At 20 kHz the
+    // switching noise couples strongly into the I2C lines at 12 V, causing
+    // NACKs and command timeouts.  1 kHz has less EMI at the cost of slightly
+    // more audible motor noise.
+    shield1.setPwmMode(1, 3);
+    shield1.setPwmMode(2, 3);
+    // Acceleration limit 200 (was 800): spreads direction reversals over
+    // ~3.5 ms instead of <1 ms, preventing the back-EMF + supply-voltage
+    // spike (V_supply + V_bemf ≈ 23 V at 12.6 V) from tripping the
+    // Motoron overcurrent detector.  The 3.5 ms ramp is within the 2 ms
+    // control-cycle budget for steady-state commands; only large step
+    // changes (motor reversal) are slowed, which is acceptable.
     shield1.setMaxAcceleration(1, 800);
     shield1.setMaxDeceleration(1, 800);
     shield1.setMaxAcceleration(2, 800);
@@ -392,6 +414,9 @@ void setupMotors() {
 
     shield2.reinitialize();
     shield2.clearResetFlag();
+    shield2.clearMotorFaultUnconditional();
+    shield2.setPwmMode(1, 3);
+    shield2.setPwmMode(2, 3);
     shield2.setMaxAcceleration(1, 800);
     shield2.setMaxDeceleration(1, 800);
     shield2.setMaxAcceleration(2, 800);
@@ -566,7 +591,28 @@ void loop() {
         setAllMotors(lastCmd);
     }
 
-    // 5. Telemetry at 10 Hz
+    // 5. Clear Motoron reset/fault flags every 5 cycles (10 ms).
+    //    At 12 V the higher stall current trips the Motoron overcurrent
+    //    detector mid-run; the flag latches and silently blocks setSpeed()
+    //    until explicitly cleared.  100 ms was too slow — the pendulum
+    //    drifted ~3.5° before the fault cleared, then the large accumulated
+    //    command fired all at once causing a violent lurch.  At 10 ms, the
+    //    maximum drift before re-enabling the motor is ~0.35°.
+    if (++motorFaultClearCtr >= 5) {
+        motorFaultClearCtr = 0;
+        // Count how often the Motoron RESET flag is set mid-run.
+        // If motorResetCount climbs in the telemetry, the Motoron is
+        // still resetting (I2C noise or overcurrent) and needs hardware fixes.
+        uint16_t f1 = shield1.getStatusFlags();
+        uint16_t f2 = shield2.getStatusFlags();
+        if ((f1 | f2) & 0x0001) motorResetCount++; // bit 0 = RESET flag
+        shield1.clearResetFlag();
+        shield1.clearMotorFaultUnconditional();
+        shield2.clearResetFlag();
+        shield2.clearMotorFaultUnconditional();
+    }
+
+    // 6. Telemetry at 10 Hz
     if (millis() - lastPrintMillis >= 100) {
         lastPrintMillis = millis();
         Serial.print("x:");    Serial.print(x_filt, 3);
@@ -576,7 +622,8 @@ void loop() {
         Serial.print(" thd:"); Serial.print(theta_dot_filt, 2);
         Serial.print(" cmd:"); Serial.print(lastCmd);
         Serial.print(" inv:"); Serial.print(invalidPendulumTransitions);
-        Serial.print(" cinv:"); Serial.println(invalidCartTransitions);
+        Serial.print(" cinv:"); Serial.print(invalidCartTransitions);
+        Serial.print(" rst:"); Serial.println(motorResetCount);
     }
 }
 

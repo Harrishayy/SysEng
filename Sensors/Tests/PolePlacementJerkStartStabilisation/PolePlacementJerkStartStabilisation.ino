@@ -374,7 +374,9 @@ void setupMotors() {
     Wire1.begin();
     shield1.setBus(&Wire1); shield2.setBus(&Wire1);
     shield1.reinitialize(); shield1.clearResetFlag();
+    shield1.clearMotorFaultUnconditional();
     shield2.reinitialize(); shield2.clearResetFlag();
+    shield2.clearMotorFaultUnconditional();
     setMotorRampLimits(STABILIZE_RAMP_LIMIT);
 }
 

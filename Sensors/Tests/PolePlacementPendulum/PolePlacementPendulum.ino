@@ -387,6 +387,7 @@ void setupMotors() {
 
     shield1.reinitialize();
     shield1.clearResetFlag();
+    shield1.clearMotorFaultUnconditional();
     // High acceleration limits: PP commands must propagate within one 2ms
     // timestep. The Motoron's internal ramping would otherwise add effective
     // lag and destabilise the angular rate term.
@@ -397,6 +398,7 @@ void setupMotors() {
 
     shield2.reinitialize();
     shield2.clearResetFlag();
+    shield2.clearMotorFaultUnconditional();
     shield2.setMaxAcceleration(1, 800);
     shield2.setMaxDeceleration(1, 800);
     shield2.setMaxAcceleration(2, 800);
