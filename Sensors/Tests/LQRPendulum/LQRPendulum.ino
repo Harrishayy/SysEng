@@ -116,10 +116,13 @@
 // --- Motor shields -----------------------------------------------------------
 MotoronI2C shield1(16);
 MotoronI2C shield2(17);
-// MOTOR_MAX is capped at 670 (not 800) to limit the effective motor voltage
-// to ~10.6 V equivalent (670/800 x 12.6 V = 10.57 V), keeping stall current
-// below the Motoron M3S550 overcurrent threshold that trips at 12.6 V / 800.
-const int16_t MOTOR_MAX = 800;
+// MOTOR_MAX derivation (12.3 V supply, Pololu #4862 MP, Motoron M3S550):
+//   Motor stall current @ 12 V  = 1.8 A  (datasheet)
+//   Stall current @ 12.3 V      = 1.8 × (12.3/12.0) = 1.845 A
+//   Motoron continuous limit     = 1.7 A  (per channel, M3S550 datasheet)
+//   Max safe fraction            = 1.7 / 1.845 = 0.9214
+//   Safe MOTOR_MAX               = 800 × 0.9214 = 737  → 730 (safety margin)
+const int16_t MOTOR_MAX = 730;
 
 // --- Pendulum encoder (Broadcom AS22, 1000 CPR x4 quadrature) ---------------
 const long ENCODER_CPR           = 1000;
@@ -153,18 +156,14 @@ float m = 0.91f;   // pendulum mass (kg)
 float l = 0.5f;    // pendulum CoM distance from pivot (m)
 
 // ============================================================================
-//  FORCE TO COMMAND SCALE
+//  FORCE TO COMMAND SCALE  (12.3 V supply, 4 × Pololu #4862 MP, r = 0.04 m)
 // ============================================================================
-//  Formula (always):
-//      F_max = 4 x (0.16671 N.m x V_supply/12) / wheel_radius_m
-//      SCALE = MOTOR_MAX / F_max
-//
-//  At 10.6 V, MOTOR_MAX=800:  F_max=14.73 N  SCALE = 800/14.73 = 54.33
-//  At 12.6 V, MOTOR_MAX=670:  F_max=17.50 N  SCALE = 670/17.50 = 38.29
-//      (MOTOR_MAX capped at 670 to hold motor voltage to ~10.6 V equivalent,
-//       preventing Motoron overcurrent faults at the higher supply voltage)
-//
-const float FORCE_TO_CMD_SCALE = 50.33f;
+//   Stall torque @ 12 V    = 1.700 kg·cm = 1.700 × 9.807 × 0.01 = 0.16671 N·m
+//   Stall torque @ 12.3 V  = 0.16671 × (12.3/12.0)              = 0.17088 N·m
+//   Force per motor        = 0.17088 / 0.04                      = 4.2719  N
+//   F_max (4 motors)       = 4 × 4.2719                          = 17.088  N
+//   SCALE                  = MOTOR_MAX / F_max = 730 / 17.088    = 42.72
+const float FORCE_TO_CMD_SCALE = 42.72f;
 
 // ============================================================================
 //  LQR GAINS  <-- PASTE VALUES FROM PYTHON SCRIPT HERE
@@ -178,16 +177,16 @@ const float FORCE_TO_CMD_SCALE = 50.33f;
 //  K1 < 0 (position),   K2 < 0 (velocity),
 //  K3 < 0 (angle),      K4 < 0 (angular rate)
 //
-float K1 =  22.3607f;     // N / m
-float K2 =  31.3222f;     // N.s / m
-float K3 = -213.9713f;    // N / rad    (negative -- see header explanation)
-float K4 =  -20.2750f;    // N.s / rad  (negative)
+float K1 =  22.3607f;     // N / m (22)
+float K2 =  55.3222f;     // N.s / m (55)
+float K3 = -220.9713f;    // N / rad    (negative -- see header explanation) (220)
+float K4 =  -55.2750f;    // N.s / rad  (negative) (30)
 
 // Optional LQI integral term.  Eliminates steady-state position offset.
 // Set to 0.0 during initial bring-up.  Compute from augmented Python script.
 float K5_integral = -0.0f;   // N / (m.s)
 
-float X_TARGET   = -0.0f;    // commanded cart position (m)
+float X_TARGET   = -2.0f;    // commanded cart position (m)
 float X_SETPOINT = 0.0f;    // governed cart position reference used by LQR (m)
 
 // --- Loop timing -------------------------------------------------------------
@@ -389,18 +388,17 @@ void setupMotors() {
     // leaving almost no margin for EMI-induced retries at 12 V.  A single
     // NACK retry pushed the cycle over budget, the Motoron command-timeout
     // fired, the RESET flag latched, and setSpeed() was silently ignored.
+    Wire1.setClock(400000);
     shield1.setBus(&Wire1);
     shield2.setBus(&Wire1);
 
     shield1.reinitialize();
     shield1.clearResetFlag();
     shield1.clearMotorFaultUnconditional();
-    // PWM mode 1: switches from default 20 kHz to ~1 kHz. At 20 kHz the
-    // switching noise couples strongly into the I2C lines at 12 V, causing
-    // NACKs and command timeouts.  1 kHz has less EMI at the cost of slightly
-    // more audible motor noise.
-    shield1.setPwmMode(1, 3);
-    shield1.setPwmMode(2, 3);
+    // 100 nF bypass caps on motor power rails now filter the 20 kHz switching
+    // noise that previously coupled into I2C.  Default 20 kHz PWM is restored
+    // (no setPwmMode call needed — 20 kHz is the Motoron power-on default).
+    // If rst: counter climbs again at 12 V, re-add: shield1.setPwmMode(1,1);
     // Acceleration limit 200 (was 800): spreads direction reversals over
     // ~3.5 ms instead of <1 ms, preventing the back-EMF + supply-voltage
     // spike (V_supply + V_bemf ≈ 23 V at 12.6 V) from tripping the
@@ -415,8 +413,7 @@ void setupMotors() {
     shield2.reinitialize();
     shield2.clearResetFlag();
     shield2.clearMotorFaultUnconditional();
-    shield2.setPwmMode(1, 3);
-    shield2.setPwmMode(2, 3);
+    // Same as shield1 — 20 kHz default restored, caps handle the EMI.
     shield2.setMaxAcceleration(1, 800);
     shield2.setMaxDeceleration(1, 800);
     shield2.setMaxAcceleration(2, 800);

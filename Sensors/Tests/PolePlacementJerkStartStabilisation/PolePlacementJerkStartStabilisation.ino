@@ -20,7 +20,13 @@
 // --- Motor shields -----------------------------------------------------------
 MotoronI2C shield1(16);
 MotoronI2C shield2(17);
-const int16_t MOTOR_MAX = 800;
+// MOTOR_MAX derivation (12.3 V supply, Pololu #4862 MP, Motoron M3S550):
+//   Motor stall current @ 12 V  = 1.8 A  (datasheet)
+//   Stall current @ 12.3 V      = 1.8 × (12.3/12.0) = 1.845 A
+//   Motoron continuous limit     = 1.7 A  (per channel, M3S550 datasheet)
+//   Max safe fraction            = 1.7 / 1.845 = 0.9214
+//   Safe MOTOR_MAX               = 800 × 0.9214 = 737  → 730 (safety margin)
+const int16_t MOTOR_MAX = 730;
 const uint16_t STABILIZE_RAMP_LIMIT = 800;
 const uint16_t JERK_RAMP_LIMIT      = 2047;
 
@@ -54,7 +60,13 @@ float l = 0.5f;    // pendulum CoM distance from pivot (m)
 // ============================================================================
 //  FORCE-TO-COMMAND SCALE
 // ============================================================================
-const float FORCE_TO_CMD_SCALE = 54.33f;
+// FORCE_TO_CMD_SCALE  (12.3 V supply, 4 × Pololu #4862 MP, r = 0.04 m)
+//   Stall torque @ 12 V    = 1.700 kg·cm = 1.700 × 9.807 × 0.01 = 0.16671 N·m
+//   Stall torque @ 12.3 V  = 0.16671 × (12.3/12.0)              = 0.17088 N·m
+//   Force per motor        = 0.17088 / 0.04                      = 4.2719  N
+//   F_max (4 motors)       = 4 × 4.2719                          = 17.088  N
+//   SCALE                  = MOTOR_MAX / F_max = 730 / 17.088    = 42.72
+const float FORCE_TO_CMD_SCALE = 42.72f;
 
 // ============================================================================
 //  POLE PLACEMENT GAINS  (from PolePlacementPendulum.ino)
@@ -64,9 +76,9 @@ const float FORCE_TO_CMD_SCALE = 54.33f;
 //  ALL gains are NEGATIVE (due to B matrix structure).
 //
 float K1 =  22.3607f;     // N / m
-float K2 =  31.3222f;     // N.s / m
-float K3 = -213.9713f;    // N / rad
-float K4 =  -51.2750f;    // N.s / rad
+float K2 =  55.3222f;     // N.s / m
+float K3 = -220.9713f;    // N / rad
+float K4 =  -55.2750f;    // N.s / rad
 float K5_integral = 0.0f; // N / (m.s)  -- integral term, 0 during bring-up
 float x_integral  = 0.0f;
 
@@ -121,10 +133,13 @@ float x_dot_filt     = 0.0f;
 float prev_theta     = 0.0f;
 float prev_x         = 0.0f;
 int16_t lastCmd      = 0;
+uint16_t motorFaultClearCtr = 0;
+uint32_t motorResetCount    = 0;   // diagnostic: how often Motoron resets mid-run
 
 enum ControlMode { MODE_IDLE, MODE_JERK_ACCEL, MODE_JERK_BRAKE, MODE_STABILIZE };
 ControlMode controlMode = MODE_IDLE;
 unsigned long controlModeStartMillis  = 0;
+bool autoJerkTriggered = false;
 unsigned long jerkSequenceStartMillis = 0;
 int     jerkDirection   = 0;
 int16_t jerkCurrentCmd  = JERK_INITIAL_CMD;
@@ -372,6 +387,7 @@ const char* modeName() {
 
 void setupMotors() {
     Wire1.begin();
+    Wire1.setClock(400000);   // 400 kHz fast-mode: prevents I2C timeout at 12.3 V
     shield1.setBus(&Wire1); shield2.setBus(&Wire1);
     shield1.reinitialize(); shield1.clearResetFlag();
     shield1.clearMotorFaultUnconditional();
@@ -500,6 +516,12 @@ void handleSerial() {
 void loop() {
     handleSerial();
 
+    // Auto-start jerk sequence 10 s after boot if still idle
+    if (!autoJerkTriggered && controlMode == MODE_IDLE && millis() >= 10000) {
+        autoJerkTriggered = true;
+        startJerkSequence(readTheta(), theta_dot_filt);
+    }
+
     unsigned long now = micros();
     if ((now - lastControlMicros) < (unsigned long)(LOOP_DT_S * 1e6f)) return;
     lastControlMicros = now;
@@ -537,7 +559,19 @@ void loop() {
         setAllMotors(lastCmd);
     }
 
-    // 5. Telemetry at 10 Hz
+    // 5. Clear Motoron reset/fault flags every 5 cycles (10 ms)
+    if (++motorFaultClearCtr >= 5) {
+        motorFaultClearCtr = 0;
+        uint16_t f1 = shield1.getStatusFlags();
+        uint16_t f2 = shield2.getStatusFlags();
+        if ((f1 | f2) & 0x0001) motorResetCount++;
+        shield1.clearResetFlag();
+        shield1.clearMotorFaultUnconditional();
+        shield2.clearResetFlag();
+        shield2.clearMotorFaultUnconditional();
+    }
+
+    // 6. Telemetry at 10 Hz
     if (millis() - lastPrintMillis >= 100) {
         lastPrintMillis = millis();
         Serial.print("x:");    Serial.print(x_filt, 3);
@@ -548,6 +582,7 @@ void loop() {
         Serial.print(" cmd:"); Serial.print(lastCmd);
         Serial.print(" mode:"); Serial.print(modeName());
         Serial.print(" inv:"); Serial.print(invalidPendulumTransitions);
-        Serial.print(" cinv:"); Serial.println(invalidCartTransitions);
+        Serial.print(" cinv:"); Serial.print(invalidCartTransitions);
+        Serial.print(" rst:"); Serial.println(motorResetCount);
     }
 }

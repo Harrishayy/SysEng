@@ -13,7 +13,13 @@
 // ---------- Motor configuration ----------
 MotoronI2C shield1(16);
 MotoronI2C shield2(17);
-const int16_t MOTOR_MAX = 800;
+// MOTOR_MAX derivation (12.3 V supply, Pololu #4862 MP, Motoron M3S550):
+//   Motor stall current @ 12 V  = 1.8 A  (datasheet)
+//   Stall current @ 12.3 V      = 1.8 × (12.3/12.0) = 1.845 A
+//   Motoron continuous limit     = 1.7 A  (per channel, M3S550 datasheet)
+//   Max safe fraction            = 1.7 / 1.845 = 0.9214
+//   Safe MOTOR_MAX               = 800 × 0.9214 = 737  → 730 (safety margin)
+const int16_t MOTOR_MAX = 730;
 const uint16_t STABILIZE_RAMP_LIMIT = 800;
 const uint16_t JERK_RAMP_LIMIT = 2047;
 
@@ -50,9 +56,9 @@ float l = 0.5f;    // Pendulum length to CoM (m)
 //  Control law:  u = -(K1*(x-x_ref) + K2*x_dot + K3*theta + K4*theta_dot)
 //  ALL gains are NEGATIVE (due to B matrix structure).  DO NOT change signs.
 float K1 =  22.3607f;     // N / m
-float K2 =  31.3222f;     // N.s / m
-float K3 = -213.9713f;    // N / rad
-float K4 =  -20.2750f;    // N.s / rad
+float K2 =  55.3222f;     // N.s / m
+float K3 = -220.9713f;    // N / rad
+float K4 =  -55.2750f;    // N.s / rad
 float K5_integral = 0.0f; // N / (m.s)  -- LQI integral term
 float x_integral  = 0.0f; // accumulated integral of (x - x_ref)
 
@@ -60,14 +66,19 @@ float x_integral  = 0.0f; // accumulated integral of (x - x_ref)
 const float JERK_START_MIN_ANGLE = 0.03f;      // ~1.7 deg
 const float JERK_CAPTURE_ANGLE = 0.05f;        // ~8.0 deg
 const float JERK_CAPTURE_RATE = 1.0f;          // rad/s
-const int16_t JERK_INITIAL_CMD = 160;
+const int16_t JERK_INITIAL_CMD = 80;
 const int16_t JERK_CMD_STEP = 30;
 const unsigned long JERK_ACCEL_MS = 200;
 const unsigned long JERK_BRAKE_MS = 200;
 const unsigned long JERK_CAPTURE_TIMEOUT_MS = 30000;
 
-// Scaling factor: force (N) to motor command (800 / 14.73 N at 10.6V, 4 motors)
-const float FORCE_TO_CMD_SCALE = 54.33f;
+// FORCE_TO_CMD_SCALE  (12.3 V supply, 4 × Pololu #4862 MP, r = 0.04 m)
+//   Stall torque @ 12 V    = 1.700 kg·cm = 1.700 × 9.807 × 0.01 = 0.16671 N·m
+//   Stall torque @ 12.3 V  = 0.16671 × (12.3/12.0)              = 0.17088 N·m
+//   Force per motor        = 0.17088 / 0.04                      = 4.2719  N
+//   F_max (4 motors)       = 4 × 4.2719                          = 17.088  N
+//   SCALE                  = MOTOR_MAX / F_max = 730 / 17.088    = 42.72
+const float FORCE_TO_CMD_SCALE = 42.72f;
 
 // ---------- Setpoints ----------
 float X_SETPOINT = 0.0f;       // Target position (meters) - adjustable
@@ -104,6 +115,8 @@ float prev_x = 0.0f;
 // State tracking
 float state[4] = {0.0f, 0.0f, 0.0f, 0.0f};
 int16_t lastCmd = 0;
+uint16_t motorFaultClearCtr = 0;
+uint32_t motorResetCount    = 0;   // diagnostic: how often Motoron resets mid-run
 
 enum ControlMode {
   MODE_IDLE = 0,
@@ -114,6 +127,7 @@ enum ControlMode {
 
 ControlMode controlMode = MODE_IDLE;
 unsigned long controlModeStartMillis = 0;
+bool autoJerkTriggered = false;
 unsigned long jerkSequenceStartMillis = 0;
 int jerkDirection = 0;
 int jerkPulseIndex = 0;
@@ -443,6 +457,7 @@ int16_t computeLQR(float x, float x_dot, float theta, float theta_dot) {
 
 void setupMotors() {
   Wire1.begin();
+  Wire1.setClock(400000);   // 400 kHz fast-mode: prevents I2C timeout at 12.3 V
   shield1.setBus(&Wire1);
   shield2.setBus(&Wire1);
 
@@ -605,7 +620,13 @@ void handleSerialCommands() {
 
 void loop() {
   handleSerialCommands();
-  
+
+  // Auto-start jerk sequence 10 s after boot if still idle
+  if (!autoJerkTriggered && controlMode == MODE_IDLE && millis() >= 10000) {
+    autoJerkTriggered = true;
+    startJerkSequence(readPendulumAngleRad(), theta_dot_filtered);
+  }
+
   unsigned long nowMicros = micros();
   if ((nowMicros - lastControlMicros) < (unsigned long)(LOOP_DT_S * 1000000.0f)) {
     return;
@@ -654,6 +675,18 @@ void loop() {
   }
   lastCmd = motorCmd;
 
+  // Clear Motoron reset/fault flags every 5 cycles (10 ms)
+  if (++motorFaultClearCtr >= 5) {
+    motorFaultClearCtr = 0;
+    uint16_t f1 = shield1.getStatusFlags();
+    uint16_t f2 = shield2.getStatusFlags();
+    if ((f1 | f2) & 0x0001) motorResetCount++;
+    shield1.clearResetFlag();
+    shield1.clearMotorFaultUnconditional();
+    shield2.clearResetFlag();
+    shield2.clearMotorFaultUnconditional();
+  }
+
   // Debug output at 10 Hz
   if (millis() - lastPrintMillis >= 100) {
     lastPrintMillis = millis();
@@ -664,6 +697,7 @@ void loop() {
     Serial.print(" cmd:"); Serial.print(lastCmd);
     Serial.print(" mode:"); Serial.print(controlModeName());
     Serial.print(" inv:"); Serial.print(invalidPendulumTransitionCount);
-    Serial.print(" cinv:"); Serial.println(invalidCartTransitions);
+    Serial.print(" cinv:"); Serial.print(invalidCartTransitions);
+    Serial.print(" rst:"); Serial.println(motorResetCount);
   }
 }
