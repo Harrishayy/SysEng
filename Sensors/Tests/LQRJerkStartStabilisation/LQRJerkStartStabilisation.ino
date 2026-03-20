@@ -78,7 +78,7 @@ const unsigned long JERK_CAPTURE_TIMEOUT_MS = 30000;
 //   Force per motor        = 0.17088 / 0.04                      = 4.2719  N
 //   F_max (4 motors)       = 4 × 4.2719                          = 17.088  N
 //   SCALE                  = MOTOR_MAX / F_max = 730 / 17.088    = 42.72
-const float FORCE_TO_CMD_SCALE = 42.72f;
+const float FORCE_TO_CMD_SCALE = 18.72f;
 
 // ---------- Setpoints ----------
 float X_SETPOINT = 0.0f;       // Target position (meters) - adjustable

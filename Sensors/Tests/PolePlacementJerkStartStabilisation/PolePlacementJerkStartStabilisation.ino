@@ -66,7 +66,7 @@ float l = 0.5f;    // pendulum CoM distance from pivot (m)
 //   Force per motor        = 0.17088 / 0.04                      = 4.2719  N
 //   F_max (4 motors)       = 4 × 4.2719                          = 17.088  N
 //   SCALE                  = MOTOR_MAX / F_max = 730 / 17.088    = 42.72
-const float FORCE_TO_CMD_SCALE = 42.72f;
+const float FORCE_TO_CMD_SCALE = 18.72f;
 
 // ============================================================================
 //  POLE PLACEMENT GAINS  (from PolePlacementPendulum.ino)

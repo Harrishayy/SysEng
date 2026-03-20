@@ -171,7 +171,7 @@ float l = 0.5f;    // pendulum CoM distance from pivot (m)
 //   Force per motor        = 0.17088 / 0.04                      = 4.2719  N
 //   F_max (4 motors)       = 4 × 4.2719                          = 17.088  N
 //   SCALE                  = MOTOR_MAX / F_max = 730 / 17.088    = 42.72
-const float FORCE_TO_CMD_SCALE = 42.72f;
+const float FORCE_TO_CMD_SCALE = 18.72f;
 
 // ============================================================================
 //  POLE PLACEMENT GAINS  <-- PASTE VALUES FROM PYTHON SCRIPT HERE
@@ -195,7 +195,7 @@ float K4 =  -55.2750f;    // N.s / rad  (negative)
 // Set to 0.0 during initial bring-up.  Compute from augmented Python script.
 float K5_integral = -0.0f;   // N / (m.s)
 
-float X_TARGET   = -0.0f;    // commanded cart position (m)
+float X_TARGET   = -2.0f;    // commanded cart position (m)
 float X_SETPOINT = 0.0f;    // governed cart position reference used by PP (m)
 
 // --- Loop timing -------------------------------------------------------------
@@ -313,7 +313,7 @@ float readCartPos() {
 void setAllMotors(int16_t cmd) {
     shield1.setSpeed(1, cmd);
     shield1.setSpeed(2, cmd);
-    shield2.setSpeed(3, cmd);
+    shield2.setSpeed(1, cmd);
     shield2.setSpeed(2, cmd);
 }
 
@@ -407,18 +407,14 @@ void setupMotors() {
     shield1.setMaxDeceleration(1, 800);
     shield1.setMaxAcceleration(2, 800);
     shield1.setMaxDeceleration(2, 800);
-    shield1.setPwmMode(1,5);
-    shield1.setPwmMode(2,5);
 
     shield2.reinitialize();
     shield2.clearResetFlag();
     shield2.clearMotorFaultUnconditional();
-    shield2.setMaxAcceleration(3, 800);
-    shield2.setMaxDeceleration(3, 800);
+    shield2.setMaxAcceleration(1, 800);
+    shield2.setMaxDeceleration(1, 800);
     shield2.setMaxAcceleration(2, 800);
     shield2.setMaxDeceleration(2, 800);
-    shield2.setPwmMode(2,5);
-    shield2.setPwmMode(3,5);
 }
 
 void setupEncoders() {
