@@ -1,14 +1,45 @@
+# ── Python ────────────────────────────────────────────────────────────────────
 __pycache__/
 *.pyc
 *.pyo
 *.pyd
-.Python
 *.so
 *.egg
 *.egg-info/
 dist/
 build/
-.vscode/
-latex_section.md
+.Python
+
+# ── Virtual environments ───────────────────────────────────────────────────────
 .venv/
-.requirements.txt
+venv/
+env/
+ENV/
+
+# ── Generated simulation output ────────────────────────────────────────────────
+plots/
+
+# ── Duplicate / nested repo folder ────────────────────────────────────────────
+SysEng/
+
+# ── IDEs & editors ────────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# ── OS files ───────────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+
+# ── Arduino build artifacts ────────────────────────────────────────────────────
+*.elf
+*.hex
+*.bin
+*.map
+
+# ── Misc ───────────────────────────────────────────────────────────────────────
+*.log
+.env
+latex_report.tex
+Project-presentations-COMP0216-W2026-Jan09-V1.0.pdf

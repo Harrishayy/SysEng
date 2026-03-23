@@ -13,7 +13,7 @@ class MotorModel:
       Stall torque @ 12 V: 0.16671 N·m (gearbox output)
       Stall torque @ 10.6 V: 0.14727 N·m per motor
       Wheel radius: 0.04 m
-      F_max = 4 × 0.14727 / 0.04 = 14.73 N
+      F_max = 4 x 0.14727 / 0.04 = 14.73 N
     """
 
     def __init__(
