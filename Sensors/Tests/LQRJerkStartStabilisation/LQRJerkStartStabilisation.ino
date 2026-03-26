@@ -13,12 +13,7 @@
 // ---------- Motor configuration ----------
 MotoronI2C shield1(16);
 MotoronI2C shield2(17);
-// MOTOR_MAX derivation (12.3 V supply, Pololu #4862 MP, Motoron M3S550):
-//   Motor stall current @ 12 V  = 1.8 A  (datasheet)
-//   Stall current @ 12.3 V      = 1.8 × (12.3/12.0) = 1.845 A
-//   Motoron continuous limit     = 1.7 A  (per channel, M3S550 datasheet)
-//   Max safe fraction            = 1.7 / 1.845 = 0.9214
-//   Safe MOTOR_MAX               = 800 × 0.9214 = 737  → 730 (safety margin)
+// MOTOR_MAX = 730: Motoron limit 1.7 A / motor stall 1.845 A at 12.3 V → 93% of 800.
 const int16_t MOTOR_MAX = 730;
 const uint16_t STABILIZE_RAMP_LIMIT = 800;
 const uint16_t JERK_RAMP_LIMIT = 2047;
@@ -54,7 +49,6 @@ float l = 0.5f;    // Pendulum length to CoM (m)
 // LQR GAINS  (from working LQRPendulum.ino)
 // ============================================================================
 //  Control law:  u = -(K1*(x-x_ref) + K2*x_dot + K3*theta + K4*theta_dot)
-//  ALL gains are NEGATIVE (due to B matrix structure).  DO NOT change signs.
 float K1 =  22.3607f;     // N / m
 float K2 =  55.3222f;     // N.s / m
 float K3 = -220.9713f;    // N / rad
@@ -72,12 +66,7 @@ const unsigned long JERK_ACCEL_MS = 200;
 const unsigned long JERK_BRAKE_MS = 200;
 const unsigned long JERK_CAPTURE_TIMEOUT_MS = 30000;
 
-// FORCE_TO_CMD_SCALE  (12.3 V supply, 4 × Pololu #4862 MP, r = 0.04 m)
-//   Stall torque @ 12 V    = 1.700 kg·cm = 1.700 × 9.807 × 0.01 = 0.16671 N·m
-//   Stall torque @ 12.3 V  = 0.16671 × (12.3/12.0)              = 0.17088 N·m
-//   Force per motor        = 0.17088 / 0.04                      = 4.2719  N
-//   F_max (4 motors)       = 4 × 4.2719                          = 17.088  N
-//   SCALE                  = MOTOR_MAX / F_max = 730 / 17.088    = 42.72
+// FORCE_TO_CMD_SCALE: geometric derivation gives 42.72 cmd/N; empirically tuned to 18.72.
 const float FORCE_TO_CMD_SCALE = 18.72f;
 
 // ---------- Setpoints ----------
@@ -87,9 +76,8 @@ float X_SETPOINT = 0.0f;       // Target position (meters) - adjustable
 const float LOOP_DT_S = 0.002f;  // 2ms = 500 Hz (slightly slower for stability)
 
 // ---------- Filtering ----------
-// Heavier filtering on derivatives to reduce noise
-const float THETA_DOT_FILTER_ALPHA = 0.15f;  // More aggressive filtering
-const float X_DOT_FILTER_ALPHA = 0.08f;      // Even more for position (slower dynamics)
+const float THETA_DOT_FILTER_ALPHA = 0.15f;
+const float X_DOT_FILTER_ALPHA = 0.08f;
 
 // Moving average for position measurements
 const int MA_FILTER_SIZE = 5;

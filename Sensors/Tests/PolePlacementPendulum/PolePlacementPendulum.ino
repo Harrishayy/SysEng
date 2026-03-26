@@ -1,69 +1,22 @@
 /*
- * ============================================================================
- *  POLE PLACEMENT INVERTED PENDULUM CONTROLLER
- *  Arduino Giga / Mega compatible
- * ============================================================================
+ * Pole placement inverted pendulum controller
+ * Arduino Giga
  *
- *  HARDWARE (identical to LQRPendulum):
- *  ─────────────────────────────────────────────────────────────────────────
- *  Motor:  Pololu #4862  — 9.68:1 gearbox, 12 V nominal
- *          Stall torque @ 12 V : 1.700 kg·cm = 0.16671 N·m (gearbox output)
- *          No-load speed @ 12 V: 800 RPM (gearbox output)
+ * Hardware identical to LQRPendulum.ino.
+ * Poles placed at LQR closed-loop eigenvalues (Q=diag([5,1,100,10]), R=0.01)
+ * using Ackermann's formula -- gains come out identical to LQR.
  *
- *  Driver: Motoron M3S550 — speed command range -800 to +800
- *          +/-800 maps linearly to +/-100% PWM duty cycle (i.e. +/-V_supply)
+ * State:  [x (m), x_dot (m/s), theta (rad), theta_dot (rad/s)]
  *
- *  Pendulum encoder: Broadcom AS22, 1000 CPR per channel, x4 quadrature
- *          = 4000 counts per revolution
- *
- *  Cart encoder: Pololu motor encoder — 464.64 counts per revolution
- *          of the gearbox output shaft (full x4 quadrature).
- *
- *  Supply: 10.6 V (user measured)
- *
- * ============================================================================
- *  FORCE-TO-COMMAND SCALE
- * ============================================================================
- *
- *  At 10.6 V, stall torque per motor (gearbox output):
- *      T = 0.16671 x (10.6 / 12.0) = 0.14727 N.m
- *
- *  Force per motor at drive wheel (radius 0.04 m):
- *      F = T / r = 0.14727 / 0.04 = 3.682 N
- *
- *  Four motors total:
- *      F_max = 4 x 3.682 = 14.73 N
- *
- *  Mapping from force (N) to speed command:
- *      cmd = F x (800 / F_max) = F x 54.33
- *
- * ============================================================================
- *  STATE-SPACE MODEL  (linearised, point-mass pendulum, I_pendulum = 0)
- * ============================================================================
- *
- *  State:  [x (m),  x_dot (m/s),  theta (rad),  theta_dot (rad/s)]
- *  Input:  u = horizontal force on cart (N), positive = positive-x
- *
- *  A = [0,  1,           0,          0]
- *      [0,  0,      -mg/M,          0]
- *      [0,  0,           0,          1]
- *      [0,  0,  (M+m)g/Ml,          0]
- *
- *  B = [0, 1/M, 0, -1/(M*l)]^T
+ *  A = [0,  1,           0,  0]        B = [0      ]
+ *      [0,  0,      -mg/M,  0]             [1/M    ]
+ *      [0,  0,           0,  1]             [0      ]
+ *      [0,  0,  (M+m)g/Ml,  0]             [-1/(Ml)]
  *
  *  With M=1.2, m=0.91, l=0.5:
- *    A[1,2] = -7.437      A[3,2] = +34.499   (unstable pole at +/-5.87 rad/s)
- *    B[1]   = +0.8333     B[3]   = -1.6667
+ *    A[1,2] = -7.437   A[3,2] = +34.499   (unstable at ±5.87 rad/s)
  *
- * ============================================================================
- *  POLE PLACEMENT DESIGN -- run this Python script, paste result below
- * ============================================================================
- *
- *  Design method: Ackermann's formula via scipy.signal.place_poles.
- *  The target poles are extracted from the LQR design (Q=diag([5,1,100,10]),
- *  R=0.01), ensuring this controller stabilises the same dynamics with the
- *  same closed-loop bandwidth.  Because both methods share the same (A, B)
- *  and the same desired eigenvalues, the resulting K is identical to LQR.
+ * Gain computation -- run this Python script, paste K values below:
  *
  *  #!/usr/bin/env python3
  *  import numpy as np
@@ -100,24 +53,9 @@
  *  print(f"All stable: {all(np.real(p) < 0 for p in pp_poles)}")
  *  print(f"Gains match LQR: {np.allclose(K, K_lqr, rtol=1e-4)}")
  *
- * ============================================================================
- *  EXPECTED OUTPUT (same Q/R as LQR design):
- *    K1 = -22.3607   K2 = -31.3222   K3 = -213.9713   K4 = -51.2750
- *
- *  Gains are IDENTICAL to the LQR design because pole placement to the LQR
- *  eigenvalues produces a unique K for a fully controllable SISO system.
- *
- *  ALL four K values are NEGATIVE because B[3] = -1/(M*l) < 0 couples
- *  the states through the B matrix.  The control law u = -(K @ x) with
- *  all-negative K produces the correct physical response:
- *    theta > 0 (lean right)  -->  u = -(K3*theta) > 0  (chase the fall)
- *    x > 0 (cart right)      -->  u = -(K1*x) > 0      (tip pendulum to drift back)
- *
- *  For an augmented integral term (eliminates steady-state position offset):
- *  Extend A to 5x5 by appending a row [1,0,0,0,0] and a zero column,
- *  extend B with a zero row, add integral pole at e.g. -3.0, run place_poles
- *  on the 5-state system, and paste K5_integral from the result.
- * ============================================================================
+ * Expected output (Q=diag([5,1,100,10]), R=0.01):
+ *   K1 = -22.3607   K2 = -31.3222   K3 = -213.9713   K4 = -51.2750
+ *   All gains negative because B[3] = -1/(M*l) < 0.
  */
 
 #include <Motoron.h>
@@ -126,12 +64,7 @@
 // --- Motor shields -----------------------------------------------------------
 MotoronI2C shield1(16);
 MotoronI2C shield2(17);
-// MOTOR_MAX derivation (12.3 V supply, Pololu #4862 MP, Motoron M3S550):
-//   Motor stall current @ 12 V  = 1.8 A  (datasheet)
-//   Stall current @ 12.3 V      = 1.8 × (12.3/12.0) = 1.845 A
-//   Motoron continuous limit     = 1.7 A  (per channel, M3S550 datasheet)
-//   Max safe fraction            = 1.7 / 1.845 = 0.9214
-//   Safe MOTOR_MAX               = 800 × 0.9214 = 737  → 730 (safety margin)
+// 1.7 A Motoron limit / 1.845 A stall @ 12.3 V = 92% → 730 with margin
 const int16_t MOTOR_MAX = 730;
 
 // --- Pendulum encoder (Broadcom AS22, 1000 CPR x4 quadrature) ---------------
@@ -162,34 +95,16 @@ float M = 1.2f;    // cart mass (kg)
 float m = 0.91f;   // pendulum mass (kg)
 float l = 0.5f;    // pendulum CoM distance from pivot (m)
 
-// ============================================================================
-//  FORCE TO COMMAND SCALE
-// ============================================================================
-// FORCE_TO_CMD_SCALE  (12.3 V supply, 4 × Pololu #4862 MP, r = 0.04 m)
-//   Stall torque @ 12 V    = 1.700 kg·cm = 1.700 × 9.807 × 0.01 = 0.16671 N·m
-//   Stall torque @ 12.3 V  = 0.16671 × (12.3/12.0)              = 0.17088 N·m
-//   Force per motor        = 0.17088 / 0.04                      = 4.2719  N
-//   F_max (4 motors)       = 4 × 4.2719                          = 17.088  N
-//   SCALE                  = MOTOR_MAX / F_max = 730 / 17.088    = 42.72
+// Force-to-command scale (12.3 V, 4 motors, r=0.04 m). Geometric = 42.72,
+// empirically tuned to 18.72 for this hardware.
 const float FORCE_TO_CMD_SCALE = 18.72f;
 
-// ============================================================================
-//  POLE PLACEMENT GAINS  <-- PASTE VALUES FROM PYTHON SCRIPT HERE
-// ============================================================================
-//  The values below are obtained by placing closed-loop poles at the same
-//  locations as the LQR design (Q=diag([5,1,100,10]), R=0.01).
-//  Run the Python script above and replace with its exact output.
-//
-//  Control law:  u = -(K1*(x-x_ref) + K2*x_dot + K3*theta + K4*theta_dot)
-//
-//  ALL gains are NEGATIVE (due to B matrix structure).  DO NOT change signs.
-//  K1 < 0 (position),   K2 < 0 (velocity),
-//  K3 < 0 (angle),      K4 < 0 (angular rate)
-//
-float K1 =  22.3607f;     // N / m
-float K2 =  55.3222f;     // N.s / m
-float K3 = -220.9713f;    // N / rad    (negative -- see header explanation)
-float K4 =  -55.2750f;    // N.s / rad  (negative)
+// Pole placement gains -- paste output of Python script here
+// u = -(K1*(x-x_ref) + K2*x_dot + K3*theta + K4*theta_dot)
+float K1 =  22.3607f;     // N/m
+float K2 =  55.3222f;     // N·s/m
+float K3 = -220.9713f;    // N/rad
+float K4 =  -55.2750f;    // N·s/rad
 
 // Optional integral term.  Eliminates steady-state position offset.
 // Set to 0.0 during initial bring-up.  Compute from augmented Python script.
@@ -400,9 +315,7 @@ void setupMotors() {
     shield1.reinitialize();
     shield1.clearResetFlag();
     shield1.clearMotorFaultUnconditional();
-    // High acceleration limits: PP commands must propagate within one 2ms
-    // timestep. The Motoron's internal ramping would otherwise add effective
-    // lag and destabilise the angular rate term.
+    // Max acceleration: no ramping — commands must take effect within one 2 ms timestep.
     shield1.setMaxAcceleration(1, 800);
     shield1.setMaxDeceleration(1, 800);
     shield1.setMaxAcceleration(2, 800);
@@ -612,66 +525,3 @@ void loop() {
     }
 }
 
-/*
- * ============================================================================
- *  BRING-UP CHECKLIST  (identical procedure to LQRPendulum)
- * ============================================================================
- *
- *  STEP 1 -- Compute exact gains
- *    Run the Python script in the header on any machine with numpy/scipy.
- *    Paste K1, K2, K3, K4 into this file.  ALL four values will be negative.
- *
- *  STEP 2 -- Verify pendulum encoder direction
- *    Open Serial Monitor, press 'r' with pendulum upright.
- *    Gently push the TOP of the pendulum forward (positive x direction).
- *    "th:" should increase (become more positive).
- *    If it decreases: change (c - zeroCount) to (zeroCount - c) in readTheta().
- *
- *  STEP 3 -- Verify cart encoder direction
- *    Push cart forward (positive x).  "x:" should increase.
- *    If not: swap cartPinA and cartPinB constants.
- *
- *  STEP 4 -- Verify motor direction (without pendulum mounted)
- *    Temporarily replace:  lastCmd = computePP(...);
- *    with:                 lastCmd = 100;
- *    Confirm cart moves in the positive-x direction.
- *    If backward: negate cmd inside setAllMotors.  Restore computePP after.
- *
- *  STEP 5 -- Verify wheel radius
- *    Push cart exactly 1.0 m.  "x:" should read ~1.000 m.
- *    Adjust CART_WHEEL_RADIUS if needed.
- *
- *  STEP 6 -- Angle-only stabilisation test
- *    Set K1=0, K2=0, K5=0.  Mount pendulum.  Press 'r' with pendulum upright.
- *    Release.  Press '5' to increase |K3| until pendulum holds.
- *    Press '7' to increase |K4| to remove oscillation.
- *
- *  STEP 7 -- Add position control
- *    Press '1' to gradually add K1.  Cart should return to origin.
- *    Press '3' to add K2 to damp cart oscillation.
- *
- *  STEP 8 -- Enable integral term (optional)
- *    Press '9' slowly to increase K5.  This eliminates steady-state drift.
- *    If oscillation appears, reduce K5.
- *
- * ============================================================================
- *  COMPARISON WITH LQRPendulum
- * ============================================================================
- *
- *  LQR chooses K to minimise integral{ x'Qx + u'Ru } dt.
- *  Pole Placement chooses K to assign eigenvalues of (A - B*K) directly.
- *
- *  When both methods target the same closed-loop poles (as done here), the
- *  resulting K gains are numerically identical.  The practical difference:
- *
- *    LQR:   poles emerge as a consequence of the Q/R trade-off.
- *           Intuitive to tune (increase Q[i,i] to penalise state i more).
- *
- *    PP:    poles are specified directly in rad/s.
- *           Intuitive to tune (move poles further left for faster response,
- *           at the cost of more control effort and potential actuator saturation).
- *
- *  Both controllers are equivalent at the hardware level for this design.
- *
- * ============================================================================
- */

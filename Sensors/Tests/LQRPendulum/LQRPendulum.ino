@@ -1,46 +1,21 @@
 /*
- * ============================================================================
- *  TRUE LQR INVERTED PENDULUM CONTROLLER
- *  Arduino Giga / Mega compatible
- * ============================================================================
+ * LQR inverted pendulum controller
+ * Arduino Giga
  *
- *  HARDWARE CONFIRMED FROM DATASHEETS:
- *  ─────────────────────────────────────────────────────────────────────────
- *  Motor:  Pololu #4862  — 9.68:1 gearbox, 12 V nominal
- *          Stall torque @ 12 V : 1.700 kg·cm = 0.16671 N·m (gearbox output)
- *          No-load speed @ 12 V: 800 RPM (gearbox output)
+ * Hardware:
+ *   Motor:           Pololu #4862, 9.68:1 gearbox, 12 V nominal
+ *                    Stall torque @ 12 V: 0.16671 N·m, no-load: 800 RPM
+ *   Driver:          Motoron M3S550, speed range -800 to +800
+ *   Pendulum encoder: Broadcom AS22, 1000 CPR x4 = 4000 counts/rev
+ *   Cart encoder:    Pololu motor encoder, 464.64 counts/rev (gearbox shaft)
+ *   Supply:          10.6 V measured
  *
- *  Driver: Motoron M3S550 — speed command range -800 to +800
- *          +/-800 maps linearly to +/-100% PWM duty cycle (i.e. +/-V_supply)
+ * Force-to-command scale (10.6 V, 4 motors, r = 0.04 m):
+ *   T_stall = 0.16671 x (10.6/12.0) = 0.14727 N·m
+ *   F_max   = 4 x (0.14727 / 0.04)  = 14.73 N
+ *   cmd/N   = 800 / 14.73           = 54.33
  *
- *  Pendulum encoder: Broadcom AS22, 1000 CPR per channel, x4 quadrature
- *          = 4000 counts per revolution  (unchanged from your original code)
- *
- *  Cart encoder: Pololu motor encoder "provides 464.64 counts per revolution
- *          of the gearbox output shaft".  Your ISRs implement full quadrature,
- *          so use 464.64 directly.  (Original code had 465.6 — minor error.)
- *
- *  Supply: 10.6 V (user measured)
- *
- * ============================================================================
- *  FORCE-TO-COMMAND SCALE  (your original value of 100.81 was ~2x too large)
- * ============================================================================
- *
- *  At 10.6 V, stall torque per motor (gearbox output):
- *      T = 0.16671 x (10.6 / 12.0) = 0.14727 N.m
- *
- *  Force per motor at drive wheel (radius 0.04 m):
- *      F = T / r = 0.14727 / 0.04 = 3.682 N
- *
- *  Four motors total:
- *      F_max = 4 x 3.682 = 14.73 N
- *
- *  Mapping from force (N) to speed command:
- *      cmd = F x (800 / F_max) = F x 54.33
- *
- * ============================================================================
- *  STATE-SPACE MODEL  (linearised, point-mass pendulum, I_pendulum = 0)
- * ============================================================================
+ * State-space model (linearised, point-mass pendulum):
  *
  *  State:  [x (m),  x_dot (m/s),  theta (rad),  theta_dot (rad/s)]
  *  Input:  u = horizontal force on cart (N), positive = positive-x
@@ -56,9 +31,7 @@
  *    A[1,2] = -7.437      A[3,2] = +34.499   (unstable pole at +/-5.87 rad/s)
  *    B[1]   = +0.8333     B[3]   = -1.6667
  *
- * ============================================================================
- *  OFFLINE GAIN COMPUTATION -- run this Python script, paste result below
- * ============================================================================
+ * Gain computation -- run this Python script, paste K values below:
  *
  *  #!/usr/bin/env python3
  *  import numpy as np
@@ -95,19 +68,12 @@
  *  # K5 = (np.linalg.inv(R) @ B5.T @ P5).flatten()
  *  # print(f"K5_integral = {K5[4]:.4f}")
  *
- * ============================================================================
- *  EXPECTED OUTPUT (Q=diag([5,1,100,10]), R=0.01):
- *    K1 = -22.3607   K2 = -31.3222   K3 = -213.9713   K4 = -51.2750
+ * Expected output (Q=diag([5,1,100,10]), R=0.01):
+ *   K1 = -22.3607   K2 = -31.3222   K3 = -213.9713   K4 = -51.2750
+ *   All gains negative because B[3] = -1/(M*l) < 0.
  *
- *  ALL four K values are NEGATIVE because B[3] = -1/(M*l) < 0 couples
- *  the states through the B matrix.  The control law u = -(K @ x) with
- *  all-negative K produces the correct physical response:
- *    theta > 0 (lean right)  -->  u = -(K3*theta) > 0  (chase the fall)
- *    x > 0 (cart right)      -->  u = -(K1*x) > 0      (tip pendulum to drift back)
- *
- *  LQI (with integral, Q5 = diag([5,1,100,10,3])):
- *    K1 = -45.2218  K2 = -44.6007  K3 = -247.9407  K4 = -58.2920  K5 = -17.3205
- * ============================================================================
+ * LQI (Q5 = diag([5,1,100,10,3])):
+ *   K5_integral = -17.3205
  */
 
 #include <Motoron.h>
@@ -116,12 +82,7 @@
 // --- Motor shields -----------------------------------------------------------
 MotoronI2C shield1(16);
 MotoronI2C shield2(17);
-// MOTOR_MAX derivation (12.3 V supply, Pololu #4862 MP, Motoron M3S550):
-//   Motor stall current @ 12 V  = 1.8 A  (datasheet)
-//   Stall current @ 12.3 V      = 1.8 × (12.3/12.0) = 1.845 A
-//   Motoron continuous limit     = 1.7 A  (per channel, M3S550 datasheet)
-//   Max safe fraction            = 1.7 / 1.845 = 0.9214
-//   Safe MOTOR_MAX               = 800 × 0.9214 = 737  → 730 (safety margin)
+// 1.7 A Motoron limit / 1.845 A stall @ 12.3 V = 92% → 730 with margin
 const int16_t MOTOR_MAX = 730;
 
 // --- Pendulum encoder (Broadcom AS22, 1000 CPR x4 quadrature) ---------------
@@ -136,10 +97,7 @@ volatile uint8_t       lastPendulumEncoderState   = 0;
 volatile unsigned long invalidPendulumTransitions = 0;
 
 // --- Cart encoder (Pololu 4862, 464.64 counts per output shaft revolution) ---
-//     Pololu spec: "464.64 counts per revolution of the gearbox output shaft"
-//     Your two CHANGE ISRs already implement full x4 quadrature decoding,
-//     so 464.64 is the correct constant to use here.
-const float CART_ENCODER_CPR  = 464.64f;   // corrected from 465.6
+const float CART_ENCODER_CPR  = 464.64f;
 const float CART_WHEEL_RADIUS = 0.04f;     // metres -- verify this!
 const int   cartPinA          = 24;
 const int   cartPinB          = 26;
@@ -155,35 +113,18 @@ float M = 1.2f;    // cart mass (kg)
 float m = 0.91f;   // pendulum mass (kg)
 float l = 0.5f;    // pendulum CoM distance from pivot (m)
 
-// ============================================================================
-//  FORCE TO COMMAND SCALE  (12.3 V supply, 4 × Pololu #4862 MP, r = 0.04 m)
-// ============================================================================
-//   Stall torque @ 12 V    = 1.700 kg·cm = 1.700 × 9.807 × 0.01 = 0.16671 N·m
-//   Stall torque @ 12.3 V  = 0.16671 × (12.3/12.0)              = 0.17088 N·m
-//   Force per motor        = 0.17088 / 0.04                      = 4.2719  N
-//   F_max (4 motors)       = 4 × 4.2719                          = 17.088  N
-//   SCALE                  = MOTOR_MAX / F_max = 730 / 17.088    = 42.72
+// Force-to-command scale (12.3 V, 4 motors, r=0.04 m). Geometric = 42.72,
+// empirically tuned to 18.72 for this hardware.
 const float FORCE_TO_CMD_SCALE = 18.72f;
 
-// ============================================================================
-//  LQR GAINS  <-- PASTE VALUES FROM PYTHON SCRIPT HERE
-// ============================================================================
-//  The values below are analytically derived estimates (see header for method).
-//  RUN THE PYTHON SCRIPT above and replace with its exact output.
-//
-//  Control law:  u = -(K1*(x-x_ref) + K2*x_dot + K3*theta + K4*theta_dot)
-//
-//  ALL gains are NEGATIVE (due to B matrix structure).  DO NOT change signs.
-//  K1 < 0 (position),   K2 < 0 (velocity),
-//  K3 < 0 (angle),      K4 < 0 (angular rate)
-//
-float K1 =  22.3607f;     // N / m (22)
-float K2 =  55.3222f;     // N.s / m (55)
-float K3 = -220.9713f;    // N / rad    (negative -- see header explanation) (220)
-float K4 =  -55.2750f;    // N.s / rad  (negative) (30)
+// LQR gains -- paste output of Python script here
+// u = -(K1*(x-x_ref) + K2*x_dot + K3*theta + K4*theta_dot)
+float K1 =  22.3607f;     // N/m
+float K2 =  55.3222f;     // N·s/m
+float K3 = -220.9713f;    // N/rad
+float K4 =  -55.2750f;    // N·s/rad
 
-// Optional LQI integral term.  Eliminates steady-state position offset.
-// Set to 0.0 during initial bring-up.  Compute from augmented Python script.
+// LQI integral term -- set 0 during bring-up, compute from augmented script
 float K5_integral = -0.0f;   // N / (m.s)
 
 float X_TARGET   = -2.0f;    // commanded cart position (m)
@@ -192,16 +133,13 @@ float X_SETPOINT = 0.0f;    // governed cart position reference used by LQR (m)
 // --- Loop timing -------------------------------------------------------------
 const float LOOP_DT_S = 0.002f;   // 2 ms = 500 Hz
 
-// --- Position reference governor -------------------------------------------
-// Large step changes in x_ref make the LQR fight position error too hard and
-// sacrifice angle stability.  Move the reference slowly and only while upright.
+// --- Position reference governor -- advance slowly only while near upright ---
 const float X_REF_SLEW_RATE = 0.1f;        // m/s
 const float X_REF_MAX_STEP  = X_REF_SLEW_RATE * LOOP_DT_S;
 const float X_REF_MOVE_ANGLE_THRESHOLD = 0.10f; // rad  (~5.7 deg)
 const float X_REF_MOVE_RATE_THRESHOLD  = 0.75f; // rad/s
 
 // --- Derivative low-pass filter coefficients ---------------------------------
-//  Lower = heavier smoothing (more lag, less noise).
 const float THETA_DOT_ALPHA = 0.20f;
 const float X_DOT_ALPHA     = 0.10f;
 
@@ -343,16 +281,8 @@ void updateCartEncoder() {
     lastCartEncoderState = cur;
 }
 
-// ============================================================================
-//  LQR CONTROL LAW
-// ============================================================================
-//
-//  Single linear feedback across all four states simultaneously.
-//  No mode switching, no conditional logic.
-//
-//  u [N] = -(K1*(x-ref) + K2*x_dot + K3*theta + K4*theta_dot + K5*integral)
-//  cmd   = clamp(u * FORCE_TO_CMD_SCALE, -800, +800)
-//
+// u = -(K1*(x-ref) + K2*xdot + K3*theta + K4*thetadot + K5*integral)
+
 int16_t computeLQR(float x, float x_dot, float theta, float theta_dot) {
 
     // Position error integral (anti-windup clamped to +/-1 m.s)
@@ -383,28 +313,13 @@ void updateReferenceGovernor(float theta, float theta_dot) {
 
 void setupMotors() {
     Wire1.begin();
-    // 400 kHz fast-mode I2C: cuts each transaction from ~450 µs to ~115 µs.
-    // At 100 kHz the four setSpeed() calls per 2 ms cycle consumed ~1800 µs,
-    // leaving almost no margin for EMI-induced retries at 12 V.  A single
-    // NACK retry pushed the cycle over budget, the Motoron command-timeout
-    // fired, the RESET flag latched, and setSpeed() was silently ignored.
-    Wire1.setClock(400000);
+    Wire1.setClock(400000);   // 400 kHz keeps I2C transactions within the 2 ms budget
     shield1.setBus(&Wire1);
     shield2.setBus(&Wire1);
 
     shield1.reinitialize();
     shield1.clearResetFlag();
     shield1.clearMotorFaultUnconditional();
-    // 100 nF bypass caps on motor power rails now filter the 20 kHz switching
-    // noise that previously coupled into I2C.  Default 20 kHz PWM is restored
-    // (no setPwmMode call needed — 20 kHz is the Motoron power-on default).
-    // If rst: counter climbs again at 12 V, re-add: shield1.setPwmMode(1,1);
-    // Acceleration limit 200 (was 800): spreads direction reversals over
-    // ~3.5 ms instead of <1 ms, preventing the back-EMF + supply-voltage
-    // spike (V_supply + V_bemf ≈ 23 V at 12.6 V) from tripping the
-    // Motoron overcurrent detector.  The 3.5 ms ramp is within the 2 ms
-    // control-cycle budget for steady-state commands; only large step
-    // changes (motor reversal) are slowed, which is acceptable.
     shield1.setMaxAcceleration(1, 800);
     shield1.setMaxDeceleration(1, 800);
     shield1.setMaxAcceleration(2, 800);
@@ -413,7 +328,6 @@ void setupMotors() {
     shield2.reinitialize();
     shield2.clearResetFlag();
     shield2.clearMotorFaultUnconditional();
-    // Same as shield1 — 20 kHz default restored, caps handle the EMI.
     shield2.setMaxAcceleration(1, 800);
     shield2.setMaxDeceleration(1, 800);
     shield2.setMaxAcceleration(2, 800);
@@ -509,11 +423,9 @@ void handleSerial() {
         case 'u': X_TARGET = 1.0f; x_integral = 0; Serial.println(">> Target 1.0 m"); break;
         case 'i': X_TARGET = 2.0f; x_integral = 0; Serial.println(">> Target 2.0 m"); break;
 
-        case '1': K1 -= 2.0f;  Serial.print(">> K1 = "); Serial.println(K1, 3); break;  // more negative = stronger
-        case '2': K1 = min(0.0f, K1 + 2.0f); Serial.print(">> K1 = "); Serial.println(K1, 3); break;
+        case '1': K1 -= 2.0f;  Serial.print(">> K1 = "); Serial.println(K1, 3); break;        case '2': K1 = min(0.0f, K1 + 2.0f); Serial.print(">> K1 = "); Serial.println(K1, 3); break;
 
-        case '3': K2 -= 1.0f;  Serial.print(">> K2 = "); Serial.println(K2, 3); break;  // more negative = stronger
-        case '4': K2 = min(0.0f, K2 + 1.0f); Serial.print(">> K2 = "); Serial.println(K2, 3); break;
+        case '3': K2 -= 1.0f;  Serial.print(">> K2 = "); Serial.println(K2, 3); break;        case '4': K2 = min(0.0f, K2 + 1.0f); Serial.print(">> K2 = "); Serial.println(K2, 3); break;
 
         case '5': K3 -= 5.0f;  Serial.print(">> K3 = "); Serial.println(K3, 3); break;  // more negative
         case '6': K3 = min(0.0f, K3 + 5.0f); Serial.print(">> K3 = "); Serial.println(K3, 3); break;
@@ -521,8 +433,7 @@ void handleSerial() {
         case '7': K4 -= 2.0f;  Serial.print(">> K4 = "); Serial.println(K4, 3); break;  // more negative
         case '8': K4 = min(0.0f, K4 + 2.0f); Serial.print(">> K4 = "); Serial.println(K4, 3); break;
 
-        case '9': K5_integral -= 0.5f; Serial.print(">> K5 = "); Serial.println(K5_integral, 3); break;  // more negative = stronger
-        case '0': K5_integral = min(0.0f, K5_integral + 0.5f); Serial.print(">> K5 = "); Serial.println(K5_integral, 3); break;
+        case '9': K5_integral -= 0.5f; Serial.print(">> K5 = "); Serial.println(K5_integral, 3); break;        case '0': K5_integral = min(0.0f, K5_integral + 0.5f); Serial.print(">> K5 = "); Serial.println(K5_integral, 3); break;
 
         case 'p':
             Serial.println("\n--- Current LQR Gains ---");
@@ -588,21 +499,12 @@ void loop() {
         setAllMotors(lastCmd);
     }
 
-    // 5. Clear Motoron reset/fault flags every 5 cycles (10 ms).
-    //    At 12 V the higher stall current trips the Motoron overcurrent
-    //    detector mid-run; the flag latches and silently blocks setSpeed()
-    //    until explicitly cleared.  100 ms was too slow — the pendulum
-    //    drifted ~3.5° before the fault cleared, then the large accumulated
-    //    command fired all at once causing a violent lurch.  At 10 ms, the
-    //    maximum drift before re-enabling the motor is ~0.35°.
+    // 5. Clear Motoron fault flags every 10 ms (rising rst: count = I2C/overcurrent issue)
     if (++motorFaultClearCtr >= 5) {
         motorFaultClearCtr = 0;
-        // Count how often the Motoron RESET flag is set mid-run.
-        // If motorResetCount climbs in the telemetry, the Motoron is
-        // still resetting (I2C noise or overcurrent) and needs hardware fixes.
         uint16_t f1 = shield1.getStatusFlags();
         uint16_t f2 = shield2.getStatusFlags();
-        if ((f1 | f2) & 0x0001) motorResetCount++; // bit 0 = RESET flag
+        if ((f1 | f2) & 0x0001) motorResetCount++;
         shield1.clearResetFlag();
         shield1.clearMotorFaultUnconditional();
         shield2.clearResetFlag();
@@ -624,77 +526,3 @@ void loop() {
     }
 }
 
-/*
- * ============================================================================
- *  BRING-UP CHECKLIST  (do this in order before enabling motors under LQR)
- * ============================================================================
- *
- *  STEP 1 -- Compute exact gains
- *    Run the Python script in the header on any machine with numpy/scipy.
- *    Paste K1, K2, K3, K4 into this file.  ALL four values will be negative.
- *
- *  STEP 2 -- Verify pendulum encoder direction
- *    Open Serial Monitor, press 'r' with pendulum upright.
- *    Gently push the TOP of the pendulum forward (positive x direction).
- *    "th:" should increase (become more positive).
- *    If it decreases: change (c - zeroCount) to (zeroCount - c) in readTheta().
- *
- *  STEP 3 -- Verify cart encoder direction
- *    Push cart forward (positive x).  "x:" should increase.
- *    If not: swap cartPinA and cartPinB constants.
- *
- *  STEP 4 -- Verify motor direction (without pendulum mounted)
- *    Temporarily replace:  lastCmd = computeLQR(...);
- *    with:                 lastCmd = 100;
- *    Confirm cart moves in the positive-x direction.
- *    If backward: negate cmd inside setAllMotors.  Restore computeLQR after.
- *
- *  STEP 5 -- Verify wheel radius
- *    Push cart exactly 1.0 m.  "x:" should read ~1.000 m.
- *    Adjust CART_WHEEL_RADIUS if needed.
- *
- *  STEP 6 -- Angle-only stabilisation test
- *    Set K1=0, K2=0, K5=0.  Mount pendulum.  Press 'r' with pendulum upright.
- *    Release.  Press '5' to increase |K3| until pendulum holds.
- *    Press '7' to increase |K4| to remove oscillation.
- *
- *  STEP 7 -- Add position control
- *    Press '1' to gradually add K1.  Cart should return to origin.
- *    Press '3' to add K2 to damp cart oscillation.
- *
- *  STEP 8 -- Enable LQI (optional)
- *    Press '9' slowly to increase K5.  This eliminates steady-state drift.
- *    If oscillation appears, reduce K5.
- *
- * ============================================================================
- *  COMMON FAILURE MODES
- * ============================================================================
- *
- *  Oscillates immediately after release:
- *    K3 or K4 too large.  Press '6' or '8'.  Also verify Steps 2-4.
- *
- *  Pendulum falls without any cart response:
- *    Encoder or motor direction wrong.  Check Steps 2-4.
- *    K3 too small -- press '5'.
- *
- *  Cart drifts while pendulum is stable:
- *    K1 too small (press '1').  Or enable K5.
- *
- *  Command always hits +/-800:
- *    FORCE_TO_CMD_SCALE too large, or wheel radius wrong.
- *    Verify supply voltage and recompute scale from the header formula.
- *
- *  "inv:" counter rising rapidly:
- *    Encoder noise.  Add 100 nF caps from each encoder signal pin to GND.
- *
- * ============================================================================
- *  CURRENT LIMIT NOTE
- * ============================================================================
- *  Motoron M3S550: 1.7 A continuous per channel.
- *  Pololu 4862 stall current at 10.6 V: 1.8 x (10.6/12) = 1.59 A.
- *  This is just under the continuous rating.  Normal LQR operation is safe.
- *  Sustained stall (cmd stuck at +/-800 with motor stopped) may trigger
- *  overcurrent protection -- resolve by reducing gain magnitude or checking
- *  the mechanical system for obstructions.
- * ============================================================================
- */
