@@ -12,6 +12,7 @@ src/                            # Python simulation
 ├── state_filter.py             # Gaussian noise + MA(5) → derivative → exponential LP filter
 ├── main_interactive.py         # Matplotlib GUI simulation (500 Hz)
 ├── generate_plots.py           # Controller comparison plots
+├── generate_videos.py          # Side-by-side controller comparison videos → videos/
 ├── robustness_test.py          # Max angle / disturbance tolerance tests
 └── metrics.py                  # Performance metrics output
 
@@ -124,8 +125,8 @@ Both simulation and hardware use the same three-stage pipeline at 500 Hz:
 1. **Moving average MA(5):** circular buffer over the last 5 raw encoder readings reduces quantisation noise.
 2. **Numerical derivative:** `θ̇_raw = (θ_MA[k] − θ_MA[k−1]) / Ts`
 3. **Exponential low-pass:** `θ̇_filt[k] = α·θ̇_raw + (1−α)·θ̇_filt[k−1]`
-   - α\_θ = 0.20 (pendulum angular rate)
-   - α\_x = 0.10 (cart velocity — heavier smoothing due to slower dynamics)
+   - α\_θ = 0.20 (pendulum angular rate) — 0.15 in jerk-start variants
+   - α\_x = 0.10 (cart velocity) — 0.08 in jerk-start variants
 
 **Simulation noise injection** (before filtering):
 - Position noise: σ = 1 mm
@@ -137,6 +138,7 @@ Both simulation and hardware use the same three-stage pipeline at 500 Hz:
 cd src
 python main_interactive.py   # Interactive GUI (500 Hz, matplotlib)
 python generate_plots.py     # Controller comparison plots → plots/
+python generate_videos.py    # Side-by-side MP4 videos → videos/
 python robustness_test.py    # Max recoverable angle / disturbance tests
 python metrics.py            # Print performance metrics
 ```
