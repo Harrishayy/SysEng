@@ -43,3 +43,5 @@ Thumbs.db
 .env
 latex_report.tex
 Project-presentations-COMP0216-W2026-Jan09-V1.0.pdf
+fmea.tex
+plot.py
