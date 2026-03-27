@@ -134,7 +134,7 @@ float X_SETPOINT = 0.0f;    // governed cart position reference used by LQR (m)
 const float LOOP_DT_S = 0.002f;   // 2 ms = 500 Hz
 
 // --- Position reference governor -- advance slowly only while near upright ---
-const float X_REF_SLEW_RATE = 0.1f;        // m/s
+const float X_REF_SLEW_RATE = 1.0f;        // m/s
 const float X_REF_MAX_STEP  = X_REF_SLEW_RATE * LOOP_DT_S;
 const float X_REF_MOVE_ANGLE_THRESHOLD = 0.10f; // rad  (~5.7 deg)
 const float X_REF_MOVE_RATE_THRESHOLD  = 0.75f; // rad/s
